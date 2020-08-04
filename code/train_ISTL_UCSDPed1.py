@@ -31,10 +31,6 @@ from fedLearn import SynFedAvgLearnModel
 from models import istl
 
 # Constants
-TRAIN_VIDEO_DIR = 'poner algo'
-TEST_VIDEO_DIR = 'poner algo'
-TEST_LABEL = '/anom_cuboids_8T.txt'
-
 CUBOIDS_LENGTH = 8
 CUBOIDS_WIDTH = 224
 CUBOIDS_HEIGHT = 224
@@ -80,15 +76,19 @@ else:
 	model_base_filename = exp_filename[:]
 
 ### Data loading and preparation ###
-data_train = istl.CuboidsGenerator(source=TRAIN_VIDEO_DIR,
+train_video_dir = exp_data['train_video_dir']
+test_video_dir = exp_data['test_video_dir']
+test_label = exp_data['test_label']
+
+data_train = istl.CuboidsGenerator(source=train_video_dir,
 									cub_frames=CUBOIDS_LENGTH,
 									prep_function=resize_fn,
 									shuffle=exp_data['shuffle'])
 
-data_test = istl.CuboidsGenerator(source=TEST_VIDEO_DIR,
+data_test = istl.CuboidsGenerator(source=test_video_dir,
 									cub_frames=CUBOIDS_LENGTH,
 									prep_function=resize_fn)
-test_labels = np.loadtxt(TEST_LABEL, dtype='int8')
+test_labels = np.loadtxt(test_label, dtype='int8')
 
 train_split = data_train.make_partitions((0.3, 0.3, 0.1, 0.1, 0.1, 0.1))
 
