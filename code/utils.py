@@ -120,7 +120,8 @@ def extract_experiments_parameters(experiment: dict, mult_val_params: list or tu
 
 	for p in experiment:
 		if p in mult_val_params:
-			mult_val_dict[p] = experiment[p]
+			mult_val_dict[p] = experiment[p] if isinstance(experiment[p], (list,
+													tuple)) else [experiment[p]]
 			index_params[p] = 0
 		else:
 			uni_val_dict[p] = experiment[p]

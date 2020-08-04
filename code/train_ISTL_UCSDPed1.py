@@ -55,8 +55,6 @@ args = parser.parse_args()
 exp_filename = args.document
 store_models = args.save_model
 
-np.random.seed(exp_data['seed']) # Semilla inicializadora
-
 # Read experiment document
 with open(exp_filename) as f:
 	try:
@@ -94,9 +92,12 @@ train_split = data_train.make_partitions((0.3, 0.3, 0.1, 0.1, 0.1, 0.1))
 
 # Perform training for each parameters combination
 results = []
-params = extract_experiments_parameters(exp_data)
+params = extract_experiments_parameters(exp_data, ('seed', 'anom_thresh',
+																'temp_thresh'))
 
 for p in params:
+	np.random.seed(p['seed'])
+
 	t_start = time.time()
 
 	print('Training with parameters: {}'.format(p))
@@ -132,7 +133,7 @@ for p in params:
 	# Evaluate performance and retrieve false positive cuboids
 	# to train with them
 	evaluator = istl.EvaluatorLSTM(model=istl_fed_model.global_model,
-									cub_frames=p['cub_frames'],
+									cub_frames=CUBOIDS_LENGTH,
 									anom_thresh=p['anom_thresh'],
 									temp_thresh=p['temp_thresh'])
 
