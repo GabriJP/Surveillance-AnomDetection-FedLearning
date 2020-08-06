@@ -8,6 +8,7 @@
 # Modules imported
 from sys import float_info
 import numpy as np
+from sklearn.metrics import roc_curve
 import matplotlib.pyplot as plt
 
 def cum_sum(arr):
@@ -24,7 +25,7 @@ def cum_sum(arr):
 	if not hasattr(arr, '__getitem__'):
 		raise ValueError('"arr" must be indexable')
 
-	if any(not isinstance(x, (float, int)) for x in args):
+	if any(not isinstance(x, (float, int)) for x in arr):
 		raise ValueError('All collection\'s value must be numeric')
 
 	## Procedure
@@ -76,11 +77,11 @@ def make_partitions(arr, *args):
 	## Procedure
 
 	# Set the portions to cumulative from 0 to 1
-	cum_port = [0] + cum_sum(arr)[:-1] + [1]
+	cum_port = [0] + cum_sum(args)[:-1] + [1]
 
 	# Middle splits
-	splits = [arr[int(cum_port[i]*len(arr)):
-				int(cum_port[i+1]*len(arr)+1)] for i in range(len(cum_port))]
+	splits = [arr[int(np.round(cum_port[i]*len(arr))):
+				int(np.round(cum_port[i+1]*len(arr)))] for i in range(len(cum_port)-1)]
 
 	return splits
 
@@ -92,6 +93,9 @@ def confusion_matrix(y_true, y_pred):
 
 	n_classes = y_true.max()+1
 
+	if n_classes < 2:
+		n_classes = 2
+
 	# Matriz en la que se almacena el resultado
 	conf_matrix = np.zeros((n_classes, n_classes), dtype='int64')
 
@@ -100,6 +104,51 @@ def confusion_matrix(y_true, y_pred):
 		conf_matrix[y_true[i], y_pred[i]] += 1
 
 	return conf_matrix
+
+def equal_error_rate(y_true, y_score, eps=1e-5):
+
+	"""Computes the Equal Error Rate (EER) measure from the binary
+		prediction scores.
+
+		Parameters
+		----------
+
+		y_true : list, np.ndarray
+			The Ground-truth binary labels
+
+		y_score : list, np.ndarray
+			The prediction scores set as the probability to the positive class
+
+		eps : float (default: 10^-5)
+			Maximum difference between the closest false positive rate and
+			false negative rate allowed to consider this point as
+			the equal error rate.
+
+			If difference is greater than eps, NaN is returned
+
+		Return
+		------
+		Tuple of 2 float values:
+			- The Equal Error Rate
+			- Threshold in which EER is reachen
+	"""
+
+	fpr, tpr, threshold = roc_curve(y_true, y_score, pos_label=1)
+	fnr = 1 - tpr
+
+	"""
+	# Get the difference associated to the closest fnr and fpr points
+	eer_fpr = fpr[np.nanargmin(np.abs((fnr - fpr)))]
+	eer_fnr = fnr[np.nanargmin(np.abs((fnr - fpr)))]
+
+	return float(eer_fpr if np.abs(eer_fpr - eer_fnr) < eps else np.NaN)
+	"""
+
+	# Compute the Equal Error Rate and the threshold in which is reachen
+	eer = float(fpr[np.nanargmin(np.abs((fnr - fpr)))])
+	eer_thresh = float(threshold[np.nanargmin(np.abs((fnr - fpr)))])
+
+	return eer, eer_thresh
 
 def extract_experiments_parameters(experiment: dict, mult_val_params: list or tuple):
 
@@ -144,7 +193,7 @@ def extract_experiments_parameters(experiment: dict, mult_val_params: list or tu
 		for k in keys:
 			aux[k] = mult_val_dict[k][index_params[k]]
 
-		aux.union(uni_val_dict)
+		aux.update(uni_val_dict)
 		params.append(aux)
 
 		# Look for another combination of multivalue parameters by incrementing

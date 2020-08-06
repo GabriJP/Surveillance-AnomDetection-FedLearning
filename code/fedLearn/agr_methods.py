@@ -6,7 +6,7 @@
 ###############################################################################
 
 # Imported modules
-from tf.keras import Model
+from tensorflow.keras import Model
 
 def fedAvg(models: list, samp_per_models: list, output_model: Model):
 
@@ -32,16 +32,21 @@ def fedAvg(models: list, samp_per_models: list, output_model: Model):
 
 	# Agregates weights of first client
 	for l in range(len(output_model.layers)):
-		output_model.get_layer(l).set_weights(
-							models[0].get_layer(l).get_weights()*
-							(samp_per_models[0]/total_samples))
+		output_model.get_layer(index=l).set_weights(
+			[w*(samp_per_models[0]/total_samples) for w in models[0].get_layer(
+														index=l).get_weights()]
+		)
 
 	# Agregates weights of the rest clients
 	for c in range(1, len(models)):
 
 		for l in range(len(output_model.layers)):
-			output_model.get_layer(l).set_weights(
-								output_model.get_layer(l).get_weights()+
-								models[c].get_layer(l).get_weights()*
-								(samp_per_models[c]/total_samples))
+			w_length = len(models[c].get_layer(index=l).get_weights())
+			rate = (samp_per_models[c]/total_samples)
+
+			output_model.get_layer(index=l).set_weights(
+				[output_model.get_layer(index=l).get_weights()[i] +
+					models[c].get_layer(index=l).get_weights()[i] *
+					rate for i in range(w_length)]
+			)
 

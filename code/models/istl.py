@@ -22,20 +22,107 @@
 ###############################################################################
 
 # Imported modules
+from sys import float_info
 import os
 import warnings
 import random
 from copy import copy, deepcopy
 from bisect import bisect_right
 import numpy as np
+import imghdr
 #import tensorflow as tf
-from tensorflow.keras import Model, Sequential
+from tensorflow.keras import Model, Sequential, Input
 from tensorflow.keras.layers import Conv2D, ConvLSTM2D, Conv2DTranspose
+from tensorflow.keras.layers import Conv3D, Conv3DTranspose
 from tensorflow.keras.utils import Sequence
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
-from utils import make_partitions, confusion_matrix
+from sklearn.metrics import roc_auc_score
+from utils import make_partitions, confusion_matrix, equal_error_rate
 
-def build_ISTL():
+def build_ISTL(cub_length: int):
+
+	"""Builder function to construct an empty Tensorflow Keras Model holding
+	the Incremental Spatio Temporal Learner (ISTL) architecture.
+
+	Parameters
+	----------
+
+
+	"""
+
+	if not isinstance(cub_length, int) or cub_length <= 0:
+		raise ValueError('The cuboids length must be an integer greater than 0')
+
+	istl = Sequential()
+
+	"""
+		The model receives grayscale frames of size 224 x 224 (only one channel).
+	"""
+	istl.add(Input(shape=(cub_length, 224, 224, 1)))
+
+	"""
+		C1: First Convolutional 2D layer.
+		Kernel size: 27 x 27
+		Filters: 128
+		Strides: 4x4
+	"""
+	istl.add(Conv3D(filters=128, kernel_size=(1, 27, 27), strides=(1, 4, 4), name='C1',
+					padding='same'))
+
+	"""
+		C2: Second Convolutional 2D layer.
+		Kernel size: 13x13
+		Filters: 64
+		Strides: 2x2
+	"""
+	istl.add(Conv3D(filters=64, kernel_size=(1, 13, 13), strides=(1, 2, 2), name='C2',
+					padding='same'))
+
+	"""
+		CL1: First Convolutional LSTM 2D layer
+		Kernel size: 3x3
+		Filters: 64
+	"""
+	istl.add(ConvLSTM2D(filters=64, kernel_size=(3,3), name='CL1', 
+						return_sequences=True, padding='same'))
+
+	"""
+		CL2: Second Convolutional LSTM 2D layer
+		Kernel size: 3x3
+		Filters: 32
+	"""
+	istl.add(ConvLSTM2D(filters=32, kernel_size=(3,3), name='CL2', 
+						return_sequences=True, padding='same'))
+
+	"""
+		DCL1: Third Convolutional LSTM 2D layer used for preparing deconvolution
+		Kernel size: 3x3
+		Filters: 64
+	"""
+	istl.add(ConvLSTM2D(filters=64, kernel_size=(3,3), name='DCL1', 
+						return_sequences=True, padding='same'))
+
+	"""
+		DC1: First Deconvolution 2D Layer
+		Kernel size: 13x13
+		Filters: 64
+		Strides: 2x2
+	"""
+	istl.add(Conv3DTranspose(filters=128, kernel_size=(1, 13, 13), strides=(1, 2, 2),
+				name='DC1', padding='same'))
+
+	"""
+		DC2: Second Deconvolution 2D Layer
+		Kernel size: 27x27
+		Filters: 128
+		Strides: 4x4
+	"""
+	istl.add(Conv3DTranspose(filters=1, kernel_size=(1, 27, 27), strides=(1, 4, 4),
+				name='DC2', padding='same'))
+
+	return istl
+
+def build_ISTL_old():
 
 	"""Builder function to construct an empty Tensorflow Keras Model holding
 	the Incremental Spatio Temporal Learner (ISTL) architecture.
@@ -51,7 +138,7 @@ def build_ISTL():
 	"""
 		The model receives grayscale frames of size 224 x 224 (only one channel).
 	"""
-	istl.add(Input(shape=(224, 224)))
+	istl.add(Input(shape=(224, 224, 1)))
 
 	"""
 		C1: First Convolutional 2D layer.
@@ -59,7 +146,8 @@ def build_ISTL():
 		Filters: 128
 		Strides: 4x4
 	"""
-	istl.add(Conv2D(filters=128, kernel_size=(27, 27), strides=4, name='C1'))
+	istl.add(Conv2D(filters=128, kernel_size=(27, 27), strides=4, name='C1',
+					padding='same'))
 
 	"""
 		C2: Second Convolutional 2D layer.
@@ -67,28 +155,32 @@ def build_ISTL():
 		Filters: 64
 		Strides: 2x2
 	"""
-	istl.add(Conv2D(filters=64, kernel_size=(13, 13), strides=2, name='C2'))
+	istl.add(Conv2D(filters=64, kernel_size=(13, 13), strides=2, name='C2',
+					padding='same'))
 
 	"""
 		CL1: First Convolutional LSTM 2D layer
 		Kernel size: 3x3
 		Filters: 64
 	"""
-	istl.add(ConvLSTM2D(filters=64, kernel_size=(3,3)), name='CL1')
+	istl.add(ConvLSTM2D(filters=64, kernel_size=(3,3), name='CL1', 
+						padding='same'))
 
 	"""
 		CL2: Second Convolutional LSTM 2D layer
 		Kernel size: 3x3
 		Filters: 32
 	"""
-	istl.add(ConvLSTM2D(filters=32, kernel_size=(3,3)), name='CL2')
+	istl.add(ConvLSTM2D(filters=32, kernel_size=(3,3), name='CL2', 
+						padding='same'))
 
 	"""
 		DCL1: Third Convolutional LSTM 2D layer used for preparing deconvolution
 		Kernel size: 3x3
 		Filters: 64
 	"""
-	istl.add(ConvLSTM2D(filters=64, kernel_size=(3,3)), name='DCL1')
+	istl.add(ConvLSTM2D(filters=64, kernel_size=(3,3), name='DCL1', 
+						padding='same'))
 
 	"""
 		DC1: First Deconvolution 2D Layer
@@ -96,7 +188,8 @@ def build_ISTL():
 		Filters: 64
 		Strides: 2x2
 	"""
-	istl.add(Conv2DTranspose(filters=64, kernel_size=(13,13), strides=2, name='DC1'))
+	istl.add(Conv2DTranspose(filters=64, kernel_size=(13,13), strides=2,
+				name='DC1', padding='same'))
 
 	"""
 		DC2: Second Deconvolution 2D Layer
@@ -104,7 +197,8 @@ def build_ISTL():
 		Filters: 128
 		Strides: 4x4
 	"""
-	istl.add(Conv2DTranspose(filters=128, kernel_size=(27, 27), strides=4, name='DC2'))
+	istl.add(Conv2DTranspose(filters=128, kernel_size=(27, 27), strides=4,
+				name='DC2', padding='same'))
 
 	return istl
 
@@ -113,7 +207,7 @@ class ScorerLSTM:
 	"""Handler class for the cuboids scoring through a previous trained
 		ISTL Model
 
-		Atributes
+		Attributes
 		----------
 
 		model : tf.keras.Model
@@ -126,7 +220,7 @@ class ScorerLSTM:
 	def __init__(self, model: Model, cub_frames: int):
 
 		# Check input
-		if not isistance(model, Model):
+		if not isinstance(model, Model):
 			raise ValueError('"model" should be a Keras model containing a '\
 							'pretrained ISTL model')
 
@@ -136,6 +230,30 @@ class ScorerLSTM:
 		# Copy to the object atributes
 		self.__model = model
 		self.__cub_frames = cub_frames
+
+		"""Returns the reconstruction error of each video's cuboids
+
+			Parameters
+			----------
+
+			cuboid: numpy array
+				Array storing the video frames which will be organized as a cuboids
+				for its detection
+				Dims of array must be (# frames, width, height)
+
+
+			Raise
+			-----
+
+			ValueError: cuboid is not a numpy array
+			ValueError: cuboid is not a 3-dimensional array of
+						shape (?, width, height)
+
+			Return: 64-bit float Numpy array with reconstruction error of
+				each video cuboid
+		"""
+		self.score_video = np.vectorize(self.score_cuboid)
+
 
 	## Observers ##
 
@@ -157,7 +275,7 @@ class ScorerLSTM:
 
 		self.__cub_frames = value
 
-	def score_cuboid(self, cuboid: np.array) -> np.float64:
+	def score_cuboid(self, cuboid: np.ndarray) -> np.float64:
 
 		"""Returns the reconstruction error of an input cuboid
 
@@ -180,16 +298,16 @@ class ScorerLSTM:
 		"""
 
 		# Check input
-		if not isinstance(cuboids, np.array):
+		if not isinstance(cuboid, np.ndarray):
 			raise ValueError('"cuboids" must be a numpy array')
 
+		"""
 		if cuboids.ndim != 3 or cuboids.shape[1:] != tuple(self.__model.input.shape[1:]):
 			raise ValueError('cuboids must be a 3-dimensional array of '\
 								'dims ({},{},{})'.format('?',
 													self.__model.input.shape[1],
 													self.__model.input.shape[2])
 							)
-
 		cuboid = cuboid[min(cuboid.shape[0], self.__cub_frames)]
 
 		# Compute the sum of squared differences between the original
@@ -197,31 +315,10 @@ class ScorerLSTM:
 		rec_error = np.apply_along_axis(lambda frame: ((frame -
 									self.__model.predict(frame))**2).sum(), 0)
 		rec_error = np.square(rec_error.sum())
+		"""
 
-		return rec_error
+		return np.sum((cuboid - self.__model.predict(cuboid))**2)
 
-	"""Returns the reconstruction error of each video's cuboids
-
-		Parameters
-		----------
-
-		cuboid: numpy array
-			Array storing the video frames which will be organized as a cuboids
-			for its detection
-			Dims of array must be (# frames, width, height)
-
-
-		Raise
-		-----
-
-		ValueError: cuboid is not a numpy array
-		ValueError: cuboid is not a 3-dimensional array of
-					shape (?, width, height)
-
-		Return: 64-bit float Numpy array with reconstruction error of
-			each video cuboid
-	"""
-	score_video = np.vectorize(score_cuboid)
 
 class PredictorLSTM(ScorerLSTM):
 
@@ -281,7 +378,6 @@ class PredictorLSTM(ScorerLSTM):
 
 		if (not isinstance(value, (float, int)) or value < 0 or value > 1):
 			raise ValueError('"anom_thresh" must be a float in [0, 1]')
-
 		self.__anom_thresh = value
 
 	@temp_thresh.setter
@@ -293,7 +389,7 @@ class PredictorLSTM(ScorerLSTM):
 
 		self.__temp_thresh = value
 
-	def predict_cuboid(self, cuboid: np.array) -> bool:
+	def predict_cuboid(self, cuboid: np.ndarray) -> bool:
 
 		"""Predict wheter a cuboid is considered anomalous (i.e. its
 			reconstruction error is greater than the anomalous threshold)
@@ -321,7 +417,7 @@ class PredictorLSTM(ScorerLSTM):
 	def predict_video(self, video: np.array) -> bool:
 
 		# Check input
-		if not isinstance(cuboids, np.array):
+		if not isinstance(cuboids, np.ndarray):
 			raise ValueError('"cuboids" must be a numpy array')
 
 		if cuboids.ndim != 3 or cuboids.shape[1:] != tuple(self.model.input.shape[1:]):
@@ -385,6 +481,7 @@ class EvaluatorLSTM(PredictorLSTM):
 			limits.
 	"""
 
+	## Constructor ##
 	def __init__(self, model: Model, cub_frames: int, anom_thresh: float,
 										temp_thresh: int, max_cuboids: int=None):
 		super(EvaluatorLSTM, self).__init__(model, cub_frames, anom_thresh,
@@ -399,7 +496,8 @@ class EvaluatorLSTM(PredictorLSTM):
 	## Getters ##
 	@property
 	def fp_cuboids(self):
-		return tuple(self.__fp_cuboids)
+		return (np.array(self.__fp_cuboids) if len(self.__fp_cuboids) > 1 else
+									np.expand_dims(self.__fp_cuboids, axis=0))
 
 	def __len__(self):
 		return len(self.__fp_cuboids)
@@ -437,7 +535,9 @@ class EvaluatorLSTM(PredictorLSTM):
 			labels = np.array(labels)
 
 		# Predict all cuboids
-		scores = self.score_video(cuboids).squeeze()
+		scores = np.array(
+		[self.score_cuboid(cuboids[i]) for i in range(len(cuboids))]).squeeze()
+
 		pred = scores >= self.anom_thresh
 
 		# Detect false positives and store them
@@ -450,8 +550,10 @@ class EvaluatorLSTM(PredictorLSTM):
 				# be inserted to keep cuboids ordered from greater to lower
 				# reconstruction error
 
+				aux = cuboids[i] if cuboids[i].shape[0] == 1 else cuboids[i][0]
+
 				self.__fp_rec_errors.insert(idx, scores[i])
-				self.__fp_cuboids.insert(idx, cuboids[i])
+				self.__fp_cuboids.insert(idx, aux)
 
 				# Remove extra cuboids if max number of cuboid if specified
 				if (self.__max_cuboids and len(self.__fp_cuboids) >=
@@ -461,17 +563,31 @@ class EvaluatorLSTM(PredictorLSTM):
 
 		# Compute performance metrics
 		cm = confusion_matrix(labels, pred)
+		
+		try:
+			auc = roc_auc_score(labels, scores)
+		except Exception as e:
+			auc = np.NaN
+			warnings.warn(str(e))
+
+		try:
+			eer = equal_error_rate(labels, scores)[0]
+		except Exception as e:
+			eer = np.NaN
+			warnings.warn(str(e))
 
 		return {
-				'accuracy': (cm[1, 1] + cm[0, 0])/len(scores),
-				'precission': cm[1, 1] / (cm[1, 1] + cm[1, 0]),
-				'recall': cm[1, 1] / (cm[1, 1] + cm[0, 1]),
-				'specificity': cm[0, 0] / (cm[0, 0] + cm[1, 0]),
+				'accuracy': float((cm[1, 1] + cm[0, 0])/len(scores)),
+				'precission': float(cm[1, 1] / (cm[1, 1] + cm[1, 0])),
+				'recall': float(cm[1, 1] / (cm[1, 1] + cm[0, 1])),
+				'specificity': float(cm[0, 0] / (cm[0, 0] + cm[1, 0])),
+				'AUC': float(auc),
+				'EER': eer,
 				'confusion matrix': {
-					'TP': cm[1, 1],
-					'TN': cm[0, 0],
-					'FP': cm[1, 0],
-					'FN': cm[0, 1]
+					'TP': int(cm[1, 1]),
+					'TN': int(cm[0, 0]),
+					'FP': int(cm[1, 0]),
+					'FN': int(cm[0, 1])
 				}
 		}
 
@@ -504,13 +620,347 @@ class CuboidsGenerator(Sequence):
 			Function containing the preprocessing operations workflow to be
 				applied to each video frame
 
+		max_cuboids: int (default 100)
+			Max number of consecutive cuboids to be retrieved from disk when
+			the generator flows cuboids from the videos
+	"""
+
+	def __init__(self, source: str, cub_frames: int, prep_fn=None,
+					batch_size=None, max_cuboids: int=100, shuffle=False,
+					seed=None, return_cub_as_label=False):
+
+		# Check input
+		if not isinstance(source, str) or not source:
+			raise ValueError('The source must be a valid directory path')
+
+		if not isinstance(cub_frames, int) or cub_frames <= 0:
+			raise ValueError('"cub_frames" must be grater than 0')
+
+		if prep_fn and not callable(prep_fn):
+			raise ValueError('"prep_fn" is not callable')
+
+		if (batch_size is not None and (not isinstance(batch_size, int) or
+															batch_size <= 0)):
+			raise ValueError('"batch_size" must be greater than 0')
+
+		if not isinstance(max_cuboids, int) or max_cuboids <= 0:
+			raise ValueError('"max_cuboids" not a valid integer greater than 0')
+
+		if not isinstance(shuffle, bool):
+			raise ValueError('"shuffle" must be boolean')
+
+		if seed is not None and not isinstance(seed, int):
+			raise ValueError('"seed" must be None or integer')
+
+		if not isinstance(return_cub_as_label, bool):
+			raise ValueError('"return_cub_as_label" must be boolean')
+
+		if batch_size and max_cuboids < batch_size:
+			raise ValueError('The batch size cannot be greater than the '\
+																'max cuboids')
+
+		# Private attributes
+		self.__source = source
+		self.__cub_frames = cub_frames
+		self.__prep_fn = prep_fn
+		self.__batch_size = batch_size
+		self.__max_cuboids = max_cuboids
+		self.__return_cub_as_label = return_cub_as_label
+
+		self.__cuboids_info = [] # Path file of cuboids
+		#self.__video_info = dict()
+
+		self.__cuboids = None 	# Cuboids loaded from directory
+		self.__loaded_cub_range = [None, None] # Range of cuboids loaded
+
+		# Scan video files from directory
+		if not os.path.isdir(self.__source):
+			raise ValueError('"{}" not a valid directory'.format(self.__source))
+
+		self.__scan_source_dir()
+
+		# To store the order in which cuboids will be accessed
+		self.__access_cuboids = copy(self.__cuboids_info)
+
+		# Shuffle the cuboids
+		if shuffle:
+			self.shuffle(True, seed)
+
+
+	def __scan_source_dir(self):
+
+		"""Scans the desired video directory looking for all video frames files
+			and note them into cuboids for posterior loading
+		"""
+
+		self.__cuboids_info = []
+
+		for d in sorted(os.listdir(self.__source)):
+
+			dirname = (self.__source +
+						('/' if not self.__source.endswith('/') else '') + d)
+
+			# Check the listed directory is valid
+			if not os.path.isdir(dirname):
+				warnings.warn('"{}" not a directory with frames and will'\
+												' be omitted'.format(dirname))
+				continue
+
+
+			# List frames and group them into cuboids
+			cub_info = (dirname, [])
+			for f in sorted(os.listdir(dirname)):
+
+				frame_fname = dirname+'/'+f
+
+				# Note the frame to cuboid if is a valid image file
+				if imghdr.what(frame_fname):
+					cub_info[1].append(f)
+
+					if len(cub_info[1]) == self.__cub_frames:
+						self.__cuboids_info.append(cub_info)
+						cub_info = (dirname, [])
+
+			# Add the remaind cuboid and fill it by repetitions of last frame
+			# until make the cuboid with the derired number of frames
+			if len(cub_info[1]) > 0:
+				rest = self.__cub_frames - len(cub_info[1])
+				cub_info[1].extend([cub_info[1][-1]]*rest)
+
+				self.__cuboids_info.append(cub_info)
+
+	def __load_cuboid(filenames: list or tuple, prep_fn=None):
+
+		"""Loads a cuboid from its video frames files
+		"""
+		
+		frames = []
+
+		for fn in filenames:
+
+			# Loads the frame and store it
+			try:
+				img = img_to_array(load_img(fn))
+			except:
+				print(fn)
+				raise
+
+			# Apply preprocessing function if specified
+			if prep_fn:
+				img = prep_fn(img)
+
+			# Check loaded images have the same format
+			if frames and (frames[-1].shape != img.shape or
+												frames[-1].dtype != img.dtype):
+				raise ValueError('Differents sizes or types for images loaded'\
+								' detected for image "{}"'.format(fn))
+
+			frames.append(img)
+
+		frames = np.array(frames)
+
+		return frames
+
+	### Observers
+
+	@property
+	def return_cub_as_label(self):
+		return self.__return_cub_as_label
+
+	@property
+	def batch_size(self):
+		return self.__batch_size
+
+	def __len__(self) -> int:
+
+		"""Returns the number of cuboids to be retrievable or batches of cuboids
+			if batch_size where specified
+		"""
+
+		return int(len(self.__cuboids_info) if self.__batch_size is None else
+									len(self.__cuboids_info)//self.__batch_size)
+
+	def __getitem__(self, idx) -> np.ndarray:
+
+		""" Retrieves the cuboid located at index or the cuboids batch wheter
+			batch_size has been provided
+		"""
+		cub_idx = self.__batch_size * idx if self.__batch_size else idx
+
+		# Check if desired cuboid is not loaded on RAM and retrieves
+		# it from directory
+		if (self.__cuboids is None or not
+									(cub_idx >= self.__loaded_cub_range[0] and
+									cub_idx < self.__loaded_cub_range[1])):
+
+
+			self.__loaded_cub_range[0] = cub_idx
+			self.__loaded_cub_range[1] = min(cub_idx + self.__max_cuboids,
+											len(self.__cuboids_info))
+
+
+			self.__cuboids = np.array([
+				CuboidsGenerator.__load_cuboid(
+					(self.__access_cuboids[i][0]+'/'+
+						fp for fp in self.__access_cuboids[i][1]),
+					self.__prep_fn) for i in range(
+						self.__loaded_cub_range[0], self.__loaded_cub_range[1])
+				])
+
+
+		# The desired cuboid/vatch is actually stored on RAM and can be returned
+		start = cub_idx - self.__loaded_cub_range[0]
+		end = start + (self.__batch_size if self.__batch_size else 1)
+
+		#	If only one cuboid is returned, the cuboid number dimension
+		#	cannot be supresed
+		ret = self.__cuboids[start:end]
+
+		if self.__return_cub_as_label:
+			ret = (ret, ret)
+
+		return ret
+
+	### Modifiers
+	@return_cub_as_label.setter
+	def return_cub_as_label(self, v):
+		if not isinstance(v, bool):
+			raise ValueError('"return_cub_as_label" must be bool')
+
+		self.__return_cub_as_label = v
+
+	@batch_size.setter
+	def batch_size(self, v):
+
+		if (v is not None and (not isinstance(v, int) or v <= 0)):
+			raise ValueError('batch_size must be greater than 0')
+
+		self.__batch_size = v
+
+	def shuffle(self, shuf=False, seed=None):
+
+		"""Shuffle randomly the cuboids or undo the shufflering making the
+			cuboids to recover its original order
+
+			Parameters
+			----------
+
+			shuf : bool
+				True for shuffle the cuboids or False to make the cuboids
+				recover the original order
+
+			seed : int or None
+				seed to be used for the random shufflering
+		"""
+
+		if not isinstance(shuf, bool):
+			raise ValueError('"shuf" must be boolean')
+
+		if seed is not None and not isinstance(seed, int):
+			raise ValueError('"seed" must be None or integer')
+
+		if shuf:
+
+			# Change the seed is specified
+			if seed is not None:
+				or_rand_state = random.getstate()
+				random.seed(seed)
+
+			random.shuffle(self.__access_cuboids)
+
+			# Recover the original random state
+			if seed is not None:
+				random.setstate(or_rand_state)
+
+		else:
+			self.__access_cuboids = copy(self.__cuboids_info)
+
+	def make_partitions(self, partitions: tuple, shuffle=False, seed=None):
+
+		"""Returns several partitions of cuboids set as a tuple of Cuboids
+			Generator holding the desired partitions
+
+			Parameters
+			----------
+
+			partitions : tuple of float
+				Ratios of video to be contained on each partition.
+				The sum of ratios must be 1
+
+			shuffle : boolean
+				Shuffle the video before partitioning or not
+
+			seed : int
+				The seed to be used for shuffling
+
+			Return
+			------
+			Tuple containing as many cuboids generator as desired partitions
+		"""
+
+		# Check input
+		if not partitions:
+			raise ValueError('Some portion value must be passed')
+
+		if any(not isinstance(x, (float, int)) for x in partitions):
+			raise ValueError('Portion values are not number')
+
+		if np.abs(sum(partitions) - 1) > float_info.epsilon:
+			raise ValueError('portion values doesn\'t sum 1')
+
+		if not isinstance(shuffle, bool):
+			raise ValueError('"shuffle" must be boolean')
+
+		if seed is not None and not isinstance(seed, int):
+			raise ValueError('"seed" must be None or integer')
+
+		# Procedure
+
+		# Partitionate cuboids and create cuboid generator for each partition
+		cuboids_part = make_partitions(self.__access_cuboids, *partitions)
+		cubgens = []
+
+		for p in cuboids_part:
+
+			# Create new cuboid generator
+			cubgens.append(deepcopy(self))
+
+			cubgens[-1].__cuboids = None
+			cubgens[-1].__loaded_cub_range = [None, None]
+			cubgens[-1].__cuboids_info = p
+			cubgens[-1].__access_cuboids = copy(p)
+
+		return tuple(cubgens)
+
+class CuboidsGenerator2(Sequence):
+
+	"""Data generator for the retrieval of cuboids from video files from
+		a directory.
+
+		The generator flows cuboids from videos files contained on a
+		directory as they are accessed
+
+		Parameters
+		----------
+
+		source: str
+			Directory containing the videos to be flowed as cuboids
+
+		cub_frames: int
+			Number of frames contained on a cuboid
+
+		prep_fn: function (optional)
+			Function containing the preprocessing operations workflow to be
+				applied to each video frame
+
 		max_frames: int (default 100000)
 			Max number of frames to be retrieved from disk when the generator
 			flows cuboids from the videos
 	"""
 
 	def __init__(self, source: str, cub_frames: int, prep_fn=None,
-							max_frames: int=1000, shuffle=False, seed=None):
+							max_frames: int=1000, shuffle=False, seed=None,
+							return_cub_as_label=False):
 
 		# Check input
 		if not isinstance(source, str) or not source:
@@ -531,11 +981,15 @@ class CuboidsGenerator(Sequence):
 		if seed is not None and not isinstance(seed, int):
 			raise ValueError('"seed" must be None or integer')
 
+		if not isinstance(return_cub_as_label, bool):
+			raise ValueError('"return_cub_as_label" must be boolean')
+
 		# Private attributes
 		self.__source = source
 		self.__cub_frames = cub_frames
 		self.__prep_fn = prep_fn
 		self.__max_frames = max_frames
+		self.__return_cub_as_label = return_cub_as_label
 
 		self.__total_cuboids = 0 # Number of total cuboids retrievable
 		self.__total_frames = 0	 # Total frames retrievable from the videos
@@ -697,6 +1151,12 @@ class CuboidsGenerator(Sequence):
 
 		return frames
 
+	### Observers
+
+	@property
+	def return_cub_as_label(self):
+		return self.__return_cub_as_label
+
 	def __len__(self) -> int:
 
 		"""Returns the number of cuboids to be retrievable
@@ -704,7 +1164,7 @@ class CuboidsGenerator(Sequence):
 
 		return self.__total_cuboids
 
-	def __getitem__(self, idx) -> np.array:
+	def __getitem__(self, idx) -> np.ndarray:
 
 		""" Retrieves the cuboid located at index
 		"""
@@ -717,7 +1177,7 @@ class CuboidsGenerator(Sequence):
 			frames_loaded = 0
 
 			# Located the video containing the desired cuboid
-			v_idx = np.searchsorted(self.__prog, idx, side='right')
+			v_idx = np.searchsorted(self.__prog, idx)
 			i = v_idx
 
 			self.__loaded_cub_range[0] = idx
@@ -726,11 +1186,12 @@ class CuboidsGenerator(Sequence):
 			# Read videos until max_frames are loaded
 			while True:
 
-				if ((frames_loaded +
+				if (i >= len(self.__video_fnames) or (frames_loaded +
 					self.__video_info[self.__video_fnames[i]]['total_frames']) >
-					self.__max_frames or i >= len(self.__video_fnames)):
+					self.__max_frames):
 					break
 
+				print(i, idx)
 				print('-',self.__video_fnames[i])
 
 				# Load the video cuboids and append to the previous loaded ones
@@ -754,7 +1215,17 @@ class CuboidsGenerator(Sequence):
 
 
 		# The desired cuboid is actually stored on RAM and can be returned
-		return self.__cuboids[idx - self.__loaded_cub_range[0]]
+		return self.__cuboids[np.newaxis, idx - self.__loaded_cub_range[0]] if not self.__return_cub_as_label else (self.__cuboids[np.newaxis, idx - self.__loaded_cub_range[0]], )*2
+
+	### Setter ###
+	@return_cub_as_label.setter
+	def return_cub_as_label(self, v):
+		if not isinstance(v, bool):
+			raise ValueError('"return_cub_as_label" must be bool')
+
+		self.__return_cub_as_label = v
+
+	### Methods ###
 
 	def make_partitions(self, partitions: tuple, shuffle=False, seed=None):
 
@@ -786,7 +1257,7 @@ class CuboidsGenerator(Sequence):
 		if any(not isinstance(x, (float, int)) for x in partitions):
 			raise ValueError('Portion values are not number')
 
-		if np.abs(sum(partitions) - 1) > epsilon:
+		if np.abs(sum(partitions) - 1) > float_info.epsilon:
 			raise ValueError('portion values doesn\'t sum 1')
 
 		if not isinstance(shuffle, bool):
