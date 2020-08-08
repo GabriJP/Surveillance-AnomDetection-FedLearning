@@ -23,6 +23,7 @@ import time
 import sys
 import argparse
 import json
+from copy import deepcopy
 import numpy as np
 from tensorflow.keras.optimizers import SGD
 from tensorflow.keras.callbacks import EarlyStopping
@@ -66,6 +67,8 @@ with open(exp_filename) as f:
 			' :\n',str(e), file=sys.stderr)
 		exit(-1)
 
+exp_data['script'] = __file__
+
 # Get output filenames
 dot_pos = exp_filename.rfind('.')
 if dot_pos != -1:
@@ -80,12 +83,12 @@ train_video_dir = exp_data['train_video_dir']
 test_video_dir = exp_data['test_video_dir']
 test_label = exp_data['test_label']
 
-data_train = istl.CuboidsGenerator(
+data_train = istl.generators.CuboidsGenerator(
 		source=train_video_dir,
 		cub_frames=CUBOIDS_LENGTH,
 		prep_fn=resize_fn)
 
-data_test = istl.CuboidsGenerator(source=test_video_dir,
+data_test = istl.generators.CuboidsGenerator(source=test_video_dir,
 									cub_frames=CUBOIDS_LENGTH,
 									prep_fn=resize_fn)
 test_labels = np.loadtxt(test_label, dtype='int8')
@@ -96,16 +99,14 @@ config.experimental.set_memory_growth(physical_devices[0], True)
 
 # Perform training for each parameters combination
 results = []
-params = extract_experiments_parameters(exp_data, ('seed', 'anom_thresh',
-																'temp_thresh'))
-i = 1
+params = extract_experiments_parameters(exp_data, ('seed', 'batch_size'))
+
 for p in params:
 
 	if 'seed' in p:
 		np.random.seed(p['seed'])
 
 	# Prepare the data train and make partitions
-	data_train.batch_size = p['batch_size'] if 'batch_size' in p else 32
 	data_train.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
 							seed=p['seed'] if 'seed' in p else time.time())
 
@@ -128,10 +129,11 @@ for p in params:
 
 	########## First iteration (training with the 60% of data) ##########
 	t_1it_start = time.time()
-	print('Training on 1st iteration - start time: {} s'.format(t_1it_start -
-																	t_start))
+	print('Training on 1st iteration')
 
 	data = {0: train_split[0], 1: train_split[1]}
+	for c in data: data[c].batch_size = p['batch_size'] if 'batch_size' in p else 32
+
 	print('- Client 0: {} samples, Client 1: {} samples'.format(
 											len(data[0])*data[0].batch_size,
 											len(data[1])*data[1].batch_size))
@@ -156,169 +158,181 @@ for p in params:
 		plot_results({'MSE - 1st iteration - client #{}'.format(c): hist1[c]['loss']},
 			'Mean Squared Error',
 			model_base_filename +
-			'ISTL_UCSDPed1_1st_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, i))
+			'ISTL_UCSDPed1_1st_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)+1))
 
 		np.savetxt(model_base_filename +
-			'ISTL_UCSDPed1_1st_iteration_client{}_MSE_train_loss_exp={}.txt'.format(c, i),
+			'ISTL_UCSDPed1_1st_iteration_client{}_MSE_train_loss_exp={}.txt'.format(c, len(results)+1),
 					hist1[c]['loss'])
 
-	
+	## Perform the second and third iteration for each combination of anomaly
+	## thresholds and temporal thresholds
+	thresh_params = extract_experiments_parameters(p, ('anom_thresh',
+														'temp_thresh'))
 
-	########## Second iteration (training with the 20% of data) ###########
+	for q in thresh_params:
 
-	# Evaluate performance and retrieve false positive cuboids
-	# to train with them
-	evaluator = istl.EvaluatorLSTM(model=istl_fed_model.global_model,
-									cub_frames=CUBOIDS_LENGTH,
-									anom_thresh=p['anom_thresh'],
-									temp_thresh=p['temp_thresh'])
+		istl_fed_model_copy = deepcopy(istl_fed_model)
+		q['#experiment'] = len(results) + 1
 
-	p['results'] = {}
-	p['results']['2nd iteration'] = {}
-	data = {0: train_split[2], 1: train_split[3]}
+		########## Second iteration (training with the 20% of data) ###########
 
-	for c in data:
+		# Evaluate performance and retrieve false positive cuboids
+		# to train with them
+		evaluator = istl.EvaluatorLSTM(model=istl_fed_model_copy.global_model,
+										cub_frames=CUBOIDS_LENGTH,
+										anom_thresh=q['anom_thresh'],
+										temp_thresh=q['temp_thresh'])
+
+		q['results'] = {}
+		q['results']['2nd iteration'] = {}
+		data = {0: train_split[2], 1: train_split[3]}
+
+		for c in data:
+			evaluator.clear()
+
+			meas = evaluator.evaluate_cuboids(data[c], [0]*len(data[c]))
+			print('Evaluation of second iteration client set {} founding {} '\
+				' false positive cuboids\n{}'.format(c, len(evaluator), meas))
+
+			q['results']['2nd iteration'][c] = {'fp cuboids': len(evaluator),
+													'measures': meas}
+
+			data[c] = evaluator.fp_cuboids if len(evaluator) else None
+
+		# Save the results
+		results.append(q)
+
+		with open(results_filename, 'w') as f:
+			json.dump(results, f, indent=4)
+
+		# Train with false positive cuboids
+		t_2it_start = time.time()
+		print('Training on 2nd iteration - start time: {} s'.format(t_2it_start - t_start))
+		print('- Client 0: {} samples, Client 1: {} samples'.format(
+											len(data[0]),
+											len(data[1])))
+
+		hist2 = istl_fed_model_copy.fit(x=data, y=data, epochs=q['epochs'],
+							batch_size=q['batch_size'] if 'batch_size' in q else None,
+							early_stop_monitor='loss',
+							early_stop_patience=q['early_stop_patience'] if 'early_stop_patience' in q else 5,
+							early_stop_delta=q['early_stop_delta'] if 'early_stop_delta' in q else 1e-7,
+							verbose=2,
+							shuffle=False)
+
+		t_2it_end = time.time()
+		q['time']['2nd iteration'] = (t_2it_end - t_2it_start)
+		print('End of training - elapsed time {} s'.format(q['time']
+																['2nd iteration']))
+
+		# Plot MSE of client training
+		for c in range(2):
+			plot_results({'MSE - 2nd iteration - client #{}'.format(c): hist2[c]['loss']},
+				'Mean Squared Error',
+				model_base_filename+
+				'ISTL_UCSDPed1_2nd_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)))
+
+			np.savetxt(model_base_filename +
+				'ISTL_UCSDPed1_2nd_iteration_client{}_MSE_train_loss_exp={}.txt'.format(c, len(results)),
+						hist2[c]['loss'])
+
+
+
+		########## Third iteration (training with the 20% of data) ##########
+		data = {0: train_split[4], 1: train_split[5]}
+
+		# Evaluate performance and retrieve false positive cuboids
+		# to train with them
+		q['results']['3rd iteration'] = {}
+
+		for c in data:
+			evaluator.clear()
+
+			meas = evaluator.evaluate_cuboids(data[c], [0]*len(data[c]))
+			print('Evaluation of third iteration client set {} founding {} false positive'\
+					' cuboids\n{}'.format(c, len(evaluator), meas))
+
+			q['results']['3rd iteration'][c] = {'fp cuboids': len(evaluator),
+													'measures': meas}
+
+			data[c] = evaluator.fp_cuboids if len(evaluator) else None
+
+		# Save the results (p is yet stored in the list)
+		with open(results_filename, 'w') as f:
+			json.dump(results, f, indent=4)
+
+		# Training with false positive cuboids
+		t_3it_start = time.time()
+		print('Training on 3rd iteration - time: {} s'.format(t_3it_start - t_start))
+		print('- Client 0: {} samples, Client 1: {} samples'.format(
+											len(data[0]),
+											len(data[1])))
+
+		hist3 = istl_fed_model_copy.fit(x=data, y=data, epochs=q['epochs'],
+			batch_size=q['batch_size'] if 'batch_size' in q else None,
+			early_stop_monitor='loss',
+			early_stop_patience=q['early_stop_patience'] if 'early_stop_patience' in q else 5,
+			early_stop_delta=q['early_stop_delta'] if 'early_stop_delta' in q else 1e-7,
+			verbose=2,
+			shuffle=False)
+
+		t_3it_end = time.time()
+		q['time']['3rd iteration'] = (t_3it_end - t_3it_start)
+		print('End of training - elapsed time {} s'.format(
+				q['time']['3rd iteration']))
+
+		# Plot MSE of client training
+		for c in range(2):
+			plot_results({'MSE - 3rd iteration - client #{}'.format(c): hist3[c]['loss']},
+				'Mean Squared Error',
+				model_base_filename +
+				'ISTL_UCSDPed1_3rd_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)))
+
+			np.savetxt(model_base_filename +
+				'ISTL_UCSDPed1_3rd_iteration_client{}_MSE_train_loss_exp={}.txt'.format(c, len(results)),
+						hist3[c]['loss'])
+
+		# Plot MSE of all iterations
+		for c in range(2):
+			plot_results({'MSE - training - client #{}'.format(c): np.concatenate(
+																(hist1[c]['loss'],
+																hist2[c]['loss'],
+																hist3[c]['loss']),
+																axis=0)},
+				'Mean Squared Error',
+				model_base_filename +
+				'ISTL_UCSDPed1_all_training_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)))
+
+		## Save model
+		if store_models:
+			istl_fed_model.global_model.save(model_base_filename +
+								'-experiment-'+str(len(results)) + '_model.h5')
+
+		## Final evaluation
 		evaluator.clear()
 
-		meas = evaluator.evaluate_cuboids(data[c], [0]*len(data[c]))
-		print('Evaluation of second iteration client set {} founding {} false positive'\
-				' cuboids\n{}'.format(c, len(evaluator), meas))
+		t_eval_start = time.time()
+		meas = evaluator.evaluate_cuboids(data_test, test_labels)
+		t_eval_end = time.time()
 
-		p['results']['2nd iteration'][c] = {'fp cuboids': len(evaluator),
-												'measures': meas}
+		q['time']['test evaluation'] = (t_eval_end - t_eval_start)
+		q['time']['mean evaluation time per test sample'] = (
+									q['time']['test evaluation'] / len(data_test))
 
-		data[c] = evaluator.fp_cuboids if len(evaluator) else None
+		q['results']['test set'] = {'fp cuboids': len(evaluator),
+										'measures': meas}
 
-	# Save the results
-	results.append(p)
+		print('Evaluation of test set founding {} false positive'\
+					' cuboids\n{} - time taken: {}s - mean evaluation time'\
+								' per test sample: {}s'.format(len(evaluator), meas,
+													q['time']['test evaluation'],
+								q['time']['mean evaluation time per test sample']))
 
-	with open(results_filename, 'w') as f:
-		json.dump(results, f, indent=4)
-
-	# Train with false positive cuboids
-	t_2it_start = time.time()
-	print('Training on 2nd iteration - start time: {} s'.format(t_2it_start - t_start))
-	print('- Client 0: {} samples, Client 1: {} samples'.format(
-										len(data[0])*data_train.batch_size,
-										len(data[1])*data_train.batch_size))
-
-	hist2 = istl_fed_model.fit(x=data, y=data, epochs=p['epochs'],
-						early_stop_monitor='loss',
-						early_stop_patience=p['early_stop_patience'] if 'early_stop_patience' in p else 5,
-						early_stop_delta=p['early_stop_delta'] if 'early_stop_delta' in p else 1e-7,
-						verbose=2,
-						shuffle=False)
-
-	t_2it_end = time.time()
-	p['time']['2nd iteration'] = (t_2it_end - t_2it_start)
-	print('End of training - elapsed time {} s'.format(p['time']
-															['2nd iteration']))
-
-	# Plot MSE of client training
-	for c in range(2):
-		plot_results({'MSE - 2nd iteration - client #{}'.format(c): hist2[c]['loss']},
-			'Mean Squared Error',
-			model_base_filename+
-			'ISTL_UCSDPed1_2nd_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, i))
-
-		np.savetxt(model_base_filename +
-			'ISTL_UCSDPed1_2nd_iteration_client{}_MSE_train_loss_exp={}.txt'.format(c, i),
-					hist2[c]['loss'])
-
-
-
-	########## Third iteration (training with the 20% of data) ##########
-	data = {0: train_split[4], 1: train_split[5]}
-
-	# Evaluate performance and retrieve false positive cuboids
-	# to train with them
-	p['results']['3rd iteration'] = {}
-
-	for c in data:
-		evaluator.clear()
-
-		meas = evaluator.evaluate_cuboids(data[c], [0]*len(data[c]))
-		print('Evaluation of third iteration client set {} founding {} false positive'\
-				' cuboids\n{}'.format(c, len(evaluator), meas))
-
-		p['results']['3rd iteration'][c] = {'fp cuboids': len(evaluator),
-												'measures': meas}
-
-		data[c] = evaluator.fp_cuboids if len(evaluator) else None
-
-	# Save the results (p is yet stored in the list)
-	with open(results_filename, 'w') as f:
-		json.dump(results, f, indent=4)
-
-	# Training with false positive cuboids
-	t_3it_start = time.time()
-	print('Training on 3rd iteration - time: {} s'.format(t_3it_start - t_start))
-	print('- Client 0: {} samples, Client 1: {} samples'.format(
-										len(data[0])*data_train.batch_size,
-										len(data[1])*data_train.batch_size))
-
-	hist3 = istl_fed_model.fit(x=data, y=data, epochs=p['epochs'],
-						early_stop_monitor='loss',
-						early_stop_patience=p['early_stop_patience'] if 'early_stop_patience' in p else 5,
-						early_stop_delta=p['early_stop_delta'] if 'early_stop_delta' in p else 1e-7,
-						verbose=2,
-						shuffle=False)
-
-	t_3it_end = time.time()
-	p['time']['3rd iteration'] = (t_3it_end - t_3it_start)
-	print('End of training - elapsed time {} s'.format(
-			p['time']['3rd iteration']))
-
-	# Plot MSE of client training
-	for c in range(2):
-		plot_results({'MSE - 3rd iteration - client #{}'.format(c): hist3[c]['loss']},
-			'Mean Squared Error',
-			model_base_filename +
-			'ISTL_UCSDPed1_3rd_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, i))
-
-		np.savetxt(model_base_filename +
-			'ISTL_UCSDPed1_3rd_iteration_client{}_MSE_train_loss_exp={}.txt'.format(c, i),
-					hist3[c]['loss'])
-
-	# Plot MSE of all iterations
-	for c in range(2):
-		plot_results({'MSE - training - client #{}'.format(c): np.concatenate(
-															(hist1[c]['loss'],
-															hist2[c]['loss'],
-															hist3[c]['loss']),
-															axis=0)},
-			'Mean Squared Error',
-			model_base_filename +
-			'ISTL_UCSDPed1_3rd_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, i))
-
-	## Save model
-	if store_models:
-		istl_fed_model.global_model.save(model_base_filename +
-							'-experiment-'+str(len(results)+1) + '_model.h5')
-
-	## Final evaluation
-	evaluator.clear()
-
-	t_eval_start = time.time()
-	meas = evaluator.evaluate_cuboids(data_test, test_labels)
-	t_eval_end = time.time()
-
-	p['time']['test evaluation'] = (t_eval_end - t_eval_start)
-	p['time']['mean evaluation time per test sample'] = (
-								p['time']['test evaluation'] / len(data_test))
-
-	p['results']['test set'] = {'fp cuboids': len(evaluator),
-									'measures': meas}
-
-	print('Evaluation of test set founding {} false positive'\
-				' cuboids\n{} - time taken: {}s - mean evaluation time'\
-							' per test sample: {}s'.format(len(evaluator), meas,
-												p['time']['test evaluation'],
-							p['time']['mean evaluation time per test sample']))
-
-	t_end = time.time()
-	p['time']['total_elapsed time'] = float(t_end - t_start)
-	print('End of experiment - Total time taken: {}s'.format(p['time']
+		#t_end = time.time()
+		q['time']['total_elapsed time'] = (q['time']['test evaluation'] +
+												q['time']['3rd iteration'] +
+												q['time']['2nd iteration'] +
+												q['time']['1st iteration'])
+		print('End of experiment - Total time taken: {}s'.format(q['time']
 														['total_elapsed time']))
 
-	i += 1

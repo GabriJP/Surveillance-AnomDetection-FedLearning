@@ -10,6 +10,7 @@
 from copy import copy
 import numpy as np
 from tensorflow.keras import Model
+from tensorflow.keras.models import clone_model
 from .agr_methods import fedAvg
 
 
@@ -46,6 +47,8 @@ class FedLearnModel:
 		self._client_model = dict(zip(range(self._n_clients),
 					(self._build_fn(**kwargs) for i in range(self._n_clients))))
 
+		self._comp_params = None # Parameters of compilation 
+
 		# Check n_clients is correct
 		if not isinstance(self._n_clients, int) or self._n_clients <= 0:
 			raise ValueError('"n_clients" must be an integer greater than 0')
@@ -72,6 +75,9 @@ class FedLearnModel:
 
 	def compile(self, **kwargs):
 
+		# Save the compilation parameters
+		self._comp_params = kwargs
+
 		# Compile the global model
 		self._global_model.compile(**kwargs)
 
@@ -89,6 +95,26 @@ class FedLearnModel:
 	def predict(self, **kwargs):
 		# Use the global model for predicting
 		return self._global_model.predict(**kwargs)
+
+	def __deepcopy__(self, memo):
+
+		"""Makes a full copy of current object among the global and clients
+			models
+		"""
+
+		new = copy(self)
+
+		# Make a copy of the global and client models
+		new._global_model = clone_model(self._global_model)
+		new._client_model = {c: clone_model(self._global_model)
+										for c in self._client_model}
+
+		# Compile models if the original objects' models were compiled
+		if self._comp_params is not None:
+			new.compile(**self._comp_params)
+
+		return new
+		
 
 
 class SynFedLearnModel(FedLearnModel):
@@ -230,8 +256,8 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 					if self.__early_stop['times'][c] >= self.__early_stop['patience']:
 						train = False # Stop training
 
-					if kwargs['verbose']:
-						print('Client {} - After {} epochs without '\
+						if kwargs['verbose']:
+							print('Client {} - After {} epochs without '\
 								'improvements, training will be stopped'.format(
 											c, self.__early_stop['patience']))
 				else:
