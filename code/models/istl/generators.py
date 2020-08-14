@@ -21,6 +21,7 @@ import random
 from copy import copy, deepcopy
 import imghdr
 import numpy as np
+from cv2 import VideoCapture
 from tensorflow.keras.utils import Sequence
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from utils import make_partitions
@@ -93,99 +94,42 @@ class CuboidsGenerator(Sequence):
 		self.__max_cuboids = max_cuboids
 		self.__return_cub_as_label = return_cub_as_label
 
-		self.__cuboids_info = [] # Path file of cuboids
+		self._cuboids_info = [] # Path file of cuboids
 		#self.__video_info = dict()
 
-		self.__cuboids = None 	# Cuboids loaded from directory
+		self._cuboids = None 	# Cuboids loaded from directory
 		self.__loaded_cub_range = [None, None] # Range of cuboids loaded
 
 		# Scan video files from directory
 		if not os.path.isdir(self.__source):
 			raise ValueError('"{}" not a valid directory'.format(self.__source))
 
-		self.__scan_source_dir()
+		self._scan_source_dir()
 
 		# To store the order in which cuboids will be accessed
-		self.__access_cuboids = copy(self.__cuboids_info)
+		self.__access_cuboids = copy(self._cuboids_info)
 
 		# Shuffle the cuboids
 		if shuffle:
 			self.shuffle(True, seed)
 
 
-	def __scan_source_dir(self):
+	def _scan_source_dir(self):
 
-		"""Scans the desired video directory looking for all video frames files
-			and note them into cuboids for posterior loading
+		"""Scans the desired video directory looking for all video files
+			and note them into cuboids for posterior loading.
+
+			@note This method should be reimplemented on the derived class
 		"""
+		pass
 
-		self.__cuboids_info = []
-
-		for d in sorted(os.listdir(self.__source)):
-
-			dirname = (self.__source +
-						('/' if not self.__source.endswith('/') else '') + d)
-
-			# Check the listed directory is valid
-			if not os.path.isdir(dirname):
-				warnings.warn('"{}" not a directory with frames and will'\
-												' be omitted'.format(dirname))
-				continue
-
-
-			# List frames and group them into cuboids
-			cub_info = (dirname, [])
-			for f in sorted(os.listdir(dirname)):
-
-				frame_fname = dirname+'/'+f
-
-				# Note the frame to cuboid if is a valid image file
-				if imghdr.what(frame_fname):
-					cub_info[1].append(f)
-
-					if len(cub_info[1]) == self.__cub_frames:
-						self.__cuboids_info.append(cub_info)
-						cub_info = (dirname, [])
-
-			# Add the remaind cuboid and fill it by repetitions of last frame
-			# until make the cuboid with the derired number of frames
-			if len(cub_info[1]) > 0:
-				rest = self.__cub_frames - len(cub_info[1])
-				cub_info[1].extend([cub_info[1][-1]]*rest)
-
-				self.__cuboids_info.append(cub_info)
-
-	def __load_cuboid(filenames: list or tuple, prep_fn=None):
+	def _load_cuboid(cuboid: tuple, prep_fn=None):
 
 		"""Loads a cuboid from its video frames files
+
+			@note This method should be reimplemented on the derived class
 		"""
-		
-		frames = []
-
-		for fn in filenames:
-
-			# Loads the frame and store it
-			try:
-				img = img_to_array(load_img(fn))
-			except:
-				print(fn)
-				raise
-
-			# Apply preprocessing function if specified
-			if prep_fn:
-				img = prep_fn(img)
-
-			# Check loaded images have the same format
-			if frames and (frames[-1].shape != img.shape or
-												frames[-1].dtype != img.dtype):
-				raise ValueError('Differents sizes or types for images loaded'\
-								' detected for image "{}"'.format(fn))
-
-			frames.append(img)
-
-		frames = np.array(frames)
-
-		return frames
+		pass
 
 	### Observers
 
@@ -197,14 +141,30 @@ class CuboidsGenerator(Sequence):
 	def batch_size(self):
 		return self.__batch_size
 
+	@property
+	def source(self):
+		return self.__source
+
+	@property
+	def cub_frames(self):
+		return self.__cub_frames
+
+	@property
+	def prep_fn(self):
+		return self.__prep_fn
+
+	@property
+	def max_cuboids(self):
+		return self.__max_cuboids
+
 	def __len__(self) -> int:
 
 		"""Returns the number of cuboids to be retrievable or batches of cuboids
 			if batch_size where specified
 		"""
 
-		return int(len(self.__cuboids_info) if self.__batch_size is None else
-									len(self.__cuboids_info)//self.__batch_size)
+		return int(len(self._cuboids_info) if self.__batch_size is None else
+									len(self._cuboids_info)//self.__batch_size)
 
 	def __getitem__(self, idx) -> np.ndarray:
 
@@ -215,20 +175,19 @@ class CuboidsGenerator(Sequence):
 
 		# Check if desired cuboid is not loaded on RAM and retrieves
 		# it from directory
-		if (self.__cuboids is None or not
+		if (self._cuboids is None or not
 									(cub_idx >= self.__loaded_cub_range[0] and
 									cub_idx < self.__loaded_cub_range[1])):
 
 
 			self.__loaded_cub_range[0] = cub_idx
 			self.__loaded_cub_range[1] = min(cub_idx + self.__max_cuboids,
-											len(self.__cuboids_info))
+											len(self._cuboids_info))
 
 
-			self.__cuboids = np.array([
-				CuboidsGenerator.__load_cuboid(
-					(self.__access_cuboids[i][0]+'/'+
-						fp for fp in self.__access_cuboids[i][1]),
+			self._cuboids = np.array([
+				type(self)._load_cuboid(
+					self.__access_cuboids[i],
 					self.__prep_fn) for i in range(
 						self.__loaded_cub_range[0], self.__loaded_cub_range[1])
 				])
@@ -240,7 +199,7 @@ class CuboidsGenerator(Sequence):
 
 		#	If only one cuboid is returned, the cuboid number dimension
 		#	cannot be supresed
-		ret = self.__cuboids[start:end]
+		ret = self._cuboids[start:end]
 
 		if self.__return_cub_as_label:
 			ret = (ret, ret)
@@ -299,7 +258,7 @@ class CuboidsGenerator(Sequence):
 				random.setstate(or_rand_state)
 
 		else:
-			self.__access_cuboids = copy(self.__cuboids_info)
+			self.__access_cuboids = copy(self._cuboids_info)
 
 	def make_partitions(self, partitions: tuple, shuffle=False, seed=None):
 
@@ -351,12 +310,231 @@ class CuboidsGenerator(Sequence):
 			# Create new cuboid generator
 			cubgens.append(deepcopy(self))
 
-			cubgens[-1].__cuboids = None
+			cubgens[-1]._cuboids = None
 			cubgens[-1].__loaded_cub_range = [None, None]
-			cubgens[-1].__cuboids_info = p
+			cubgens[-1]._cuboids_info = p
 			cubgens[-1].__access_cuboids = copy(p)
 
 		return tuple(cubgens)
+
+class CuboidsGeneratorFromImgs(CuboidsGenerator):
+
+	"""Implementation of the Cuboids Generator utility for the retrieval of
+		cuboids from a video directory conforming one folder for each video
+		containing the video frames as individual images.
+
+		Parameters
+		----------
+
+		source: str
+			Directory containing the videos to be flowed as cuboids
+
+		cub_frames: int
+			Number of frames contained on a cuboid
+
+		prep_fn: function (optional)
+			Function containing the preprocessing operations workflow to be
+				applied to each video frame
+
+		max_cuboids: int (default 100)
+			Max number of consecutive cuboids to be retrieved from disk when
+			the generator flows cuboids from the videos
+	"""
+
+	def __init__(self, source: str, cub_frames: int, prep_fn=None,
+					batch_size=None, max_cuboids: int=100, shuffle=False,
+					seed=None, return_cub_as_label=False):
+
+		super(CuboidsGeneratorFromImgs, self).__init__(source, cub_frames,
+													prep_fn, batch_size,
+													max_cuboids, shuffle,
+													seed,
+													return_cub_as_label)
+
+	def _scan_source_dir(self):
+
+		"""Scans the desired video directory looking for all video frames files
+			and note them into cuboids for posterior loading
+		"""
+
+		self._cuboids_info = []
+
+		for d in sorted(os.listdir(self.source)):
+
+			dirname = (self.source +
+						('/' if not self.source.endswith('/') else '') + d)
+
+			# Check the listed directory is valid
+			if not os.path.isdir(dirname):
+				warnings.warn('"{}" not a directory with frames and will'\
+												' be omitted'.format(dirname))
+				continue
+
+
+			# List frames and group them into cuboids
+			cub_info = (dirname, [])
+			for f in sorted(os.listdir(dirname)):
+
+				frame_fname = dirname+'/'+f
+
+				# Note the frame to cuboid if is a valid image file
+				if imghdr.what(frame_fname):
+					cub_info[1].append(f)
+
+					if len(cub_info[1]) == self.cub_frames:
+						self._cuboids_info.append(cub_info)
+						cub_info = (dirname, [])
+
+			# Add the remaind cuboid and fill it by repetitions of last frame
+			# until make the cuboid with the derired number of frames
+			if len(cub_info[1]) > 0:
+				rest = self.cub_frames - len(cub_info[1])
+				cub_info[1].extend([cub_info[1][-1]]*rest)
+
+				self._cuboids_info.append(cub_info)
+
+	def _load_cuboid(cuboid: tuple, prep_fn=None):
+
+		"""Loads a cuboid from its video frames files
+		"""
+
+		filenames = (cuboid[0]+'/'+ fp for fp in cuboid[1])
+
+		frames = []
+
+		for fn in filenames:
+
+			# Loads the frame and store it
+			try:
+				img = img_to_array(load_img(fn))
+			except:
+				print(fn)
+				raise
+
+			# Apply preprocessing function if specified
+			if prep_fn:
+				img = prep_fn(img)
+
+			# Check loaded images have the same format
+			if frames and (frames[-1].shape != img.shape or
+												frames[-1].dtype != img.dtype):
+				raise ValueError('Differents sizes or types for images loaded'\
+								' detected for image "{}"'.format(fn))
+
+			frames.append(img)
+
+		frames = np.array(frames)
+
+		return frames
+
+class CuboidsGeneratorFromVid(CuboidsGenerator):
+
+	"""Implementation of the Cuboids Generator utility for the retrieval of
+		cuboids from a video directory containing a video file for each video.
+
+		Parameters
+		----------
+
+		source: str
+			Directory containing the videos to be flowed as cuboids
+
+		cub_frames: int
+			Number of frames contained on a cuboid
+
+		prep_fn: function (optional)
+			Function containing the preprocessing operations workflow to be
+				applied to each video frame
+
+		max_cuboids: int (default 100)
+			Max number of consecutive cuboids to be retrieved from disk when
+			the generator flows cuboids from the videos
+	"""
+
+	def __init__(self, source: str, cub_frames: int, prep_fn=None,
+					batch_size=None, max_cuboids: int=100, shuffle=False,
+					seed=None, return_cub_as_label=False):
+
+		super(CuboidsGeneratorFromVid, self).__init__(source, cub_frames,
+													prep_fn, batch_size,
+													max_cuboids, shuffle,
+													seed,
+													return_cub_as_label)
+
+	def _scan_source_dir(self):
+
+		"""Scans the desired video directory looking for all video files
+			and note them into cuboids for posterior loading
+		"""
+
+		self._cuboids_info = []
+
+		for d in sorted(os.listdir(self.source)):
+
+			fname = (self.source +
+						('/' if not self.source.endswith('/') else '') + d)
+
+			fv = VideoCapture(fname)
+
+			# Get video file and split its frames in cuboids
+			if not fv.isOpened():
+				warnings.warn('"{}" not a valid video file and will'\
+												' be omitted'.format(fname))
+				continue
+
+			n_frames = fv.get(7)
+
+
+			# List frames and group them into cuboids
+			for i in range(0, n_frames, self.cub_frames):
+				self._cuboids_info.append((fname, i,
+										min(i + self.cub_frames, n_frames)))
+
+			fv.release()
+
+	def _load_cuboid(cuboid: tuple, prep_fn=None):
+
+		"""Loads a cuboid from its video frames files
+		"""
+		fname = cuboid[0]
+		frames_range = cuboid[1:]
+
+		# Load the desired video frames
+		vid = VideoCapture(fname)
+
+		if not vid.isOpened():
+			raise ValueError('Cannot load frames {} from video '\
+									'file {}'.format(frames_range, fname))
+
+		vid.set(1, frames_range[0])
+
+		for i in range(*frames_range):
+			ret, fr = vid.read()
+
+			if not ret:
+				raise ValueError('Failed to load frame {} from video '\
+												'file {}'.format(i, fname))
+
+			# Apply preprocessing function if specified
+			if prep_fn:
+				fr = prep_fn(fr)
+
+			# Check loaded images have the same format
+			if frames and (frames[-1].shape != img.shape or
+												frames[-1].dtype != img.dtype):
+				raise ValueError('Differents sizes or types for images loaded'\
+								' detected for image "{}"'.format(fn))
+
+			frames.append(fr)
+
+		# Add the remaind cuboid and fill it by repetitions of last frame
+		# until make the cuboid with the derired number of frames
+		if len(frames) < self.cub_frames:
+			rep = len(frames) - self.cub_frames
+			frames.extend([frames[-1]]*rep)
+
+		frames = np.array(frames)
+
+		return frames
 
 class FramesFromCuboidsGen(Sequence):
 
@@ -397,14 +575,14 @@ class FramesFromCuboidsGen(Sequence):
 		if len(args) == 1:
 			args = args[0]
 
-		self.__cuboids = args
+		self._cuboids = args
 		self.__cub_frames = cub_frames
 
 	def __len__(self):
 
 		"""Returns the total number of frames to be retrievable
 		"""
-		return len(self.__cuboids)*self.__cub_frames
+		return len(self._cuboids)*self.__cub_frames
 
 	def __getitem__(self, idx):
 
@@ -420,4 +598,4 @@ class FramesFromCuboidsGen(Sequence):
 			------
 				numpy ndarray representing the desired frame
 		"""
-		return self.__cuboids[idx//self.__cub_frames][idx%self.__cub_frames]
+		return self._cuboids[idx//self.__cub_frames][idx%self.__cub_frames]
