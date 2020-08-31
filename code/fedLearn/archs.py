@@ -7,7 +7,7 @@
 ###############################################################################
 
 # Imported modules
-from copy import copy
+from copy import copy, deepcopy
 import numpy as np
 from tensorflow.keras import Model
 from tensorflow.keras.models import clone_model
@@ -47,6 +47,9 @@ class FedLearnModel:
 		# The clients model
 		self._client_model = dict(zip(range(self._n_clients),
 					(self._build_fn(**kwargs) for i in range(self._n_clients))))
+
+		self._client_best_weights = dict(zip(range(self._n_clients),
+											[None]*self._n_clients))
 
 		self._comp_params = None # Parameters of compilation
 
@@ -92,6 +95,10 @@ class FedLearnModel:
 			raise ValueError('The delta of early stopping schedule must'\
 															' be grater than 0')
 
+		if ('rest_best_weights' in params and
+							not isinstance(params['rest_best_weights'], bool)):
+			raise TypeError('"rest_best_weights" must be boolean')
+
 	### Getters ###
 
 	@property
@@ -110,11 +117,11 @@ class FedLearnModel:
 		self._comp_params = kwargs
 
 		# Compile the global model
-		self._global_model.compile(**kwargs)
+		self._global_model.compile(**deepcopy(kwargs))
 
 		# Compile the clients models
 		for client in self._client_model:
-			self._client_model[client].compile(**kwargs)
+			self._client_model[client].compile(**deepcopy(kwargs))
 
 	def fit(self, **kwargs):
 		raise NotImplementedError
@@ -139,10 +146,11 @@ class FedLearnModel:
 		new._global_model = clone_model(self._global_model)
 		new._client_model = {c: clone_model(self._global_model)
 										for c in self._client_model}
+		new._client_best_weights = copy(self._client_best_weights)
 
 		# Compile models if the original objects' models were compiled
 		if self._comp_params is not None:
-			new.compile(**self._comp_params)
+			new.compile(**deepcopy(self._comp_params))
 
 		return new
 
@@ -190,6 +198,11 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 		self.__early_stop['delta'] = (kwargs['early_stop_delta'] if
 									 	'early_stop_delta' in kwargs else 1e-7)
 		self.__early_stop['times'] = {c: 0 for c in self._client_model}
+		self.__early_stop['best'] = {c: None for c in self._client_model}
+
+		self.__early_stop['rest_best_weights'] = (
+										kwargs['early_stop_rest_best_weights']
+						if 'early_stop_rest_best_weights' in kwargs else False)
 
 		SynFedAvgLearnModel._check_early_stop_params(self.__early_stop)
 
@@ -231,7 +244,7 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 				    shuffle=kwargs['shuffle'] if 'shuffle' in kwargs else True,
 				    class_weight=kwargs['class_weight'] if 'class_weight' in kwargs else None,
 				    sample_weight=kwargs['sample_weight'] if 'sample_weight' in kwargs else None,
-				    initial_epoch=kwargs['initial_epoch'] if 'initial_epoch' in kwargs else 0,
+				    #initial_epoch=epoch-1 if epoch > 0 else 0,
 				    steps_per_epoch=kwargs['steps_per_epoch'] if 'steps_per_epoch' in kwargs else None,
 				    validation_steps=kwargs['validation_steps'] if 'validation_steps' in kwargs else None,
 				    #validation_batch_size=kwargs['validation_batch_size'] if 'validation_batch_size' in kwargs else None,
@@ -254,21 +267,38 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 					history[c][h][epoch] = hist.history[h][0]
 
 				# Execute early stopping schedule
-				if (np.abs(history[c][self.__early_stop['monitor']][epoch] -
-							history[c][self.__early_stop['monitor']][epoch-1]) <=
+				if self.__early_stop['monitor']:
+					if (self.__early_stop['best'][c] is not None and
+						-(history[c][self.__early_stop['monitor']][epoch] -
+								self.__early_stop['best'][c]) <=
 													self.__early_stop['delta']):
 
-					self.__early_stop['times'][c] += 1
+						self.__early_stop['times'][c] += 1
 
-					if self.__early_stop['times'][c] >= self.__early_stop['patience']:
-						train = False # Stop training
+						if (self.__early_stop['times'][c] >=
+												self.__early_stop['patience']):
+							train = False # Stop training
 
-						if kwargs['verbose']:
-							print('Client {} - After {} epochs without '\
+							if kwargs['verbose']:
+								print('Client {} - After {} epochs without '\
 								'improvements, training will be stopped'.format(
 											c, self.__early_stop['patience']))
-				else:
-					self.__early_stop['times'][c] = 0
+
+							# Restore weight of all client models if restore
+							# best weight is set
+							if self.__early_stop['rest_best_weights']:
+								for i in self._client_model:
+									self._client_model[i].set_weights(self._client_best_weights[i])
+
+							break
+					else:
+						self.__early_stop['times'][c] = 0
+						self.__early_stop['best'][c] = (history[c]
+										[self.__early_stop['monitor']][epoch])
+
+						if self.__early_stop['rest_best_weights']:
+							# Save client's weight if improvement
+							self._client_best_weights[c] = self._client_model[c].get_weights()
 
 			# Perform agregation
 			fedAvg(models=list(self._client_model.values()),
@@ -317,11 +347,11 @@ class AsynFedLearnModel(FedLearnModel):
 		# Sum of client cost along all iterations (the cost is computed as the
 		# number of iterations, i.e. number of fit calls, in which the model
 		# haven't contribute to the global update).
-		self.__time_cost = {c: [] for c self._client_model}
+		self.__time_cost = {c: [] for c in self._client_model}
 		#self.__total_client_cost = {c: 0 for c self._client_model}
 
 		# Last iteration in which each clients sent an update to the server
-		self.__last_it_cli = {c: 0 for c self._client_model}
+		self.__last_it_cli = {c: 0 for c in self._client_model}
 
 
 	def fit(self, **kwargs):
@@ -347,7 +377,7 @@ class AsynFedLearnModel(FedLearnModel):
 		self.__n_iters += 1 # Note the iteration performed
 
 		# Add cost to each active client
-		for c in in act_clients:
+		for c in act_clients:
 			self.__time_cost[c].append(self.__n_iters - self.__last_it_cli[c])
 			self.__last_it_cli[c] = self.__n_iters
 
@@ -437,21 +467,23 @@ class AsynFedLearnModel(FedLearnModel):
 					history[c][h][epoch] = hist.history[h][0]
 
 				# Execute early stopping schedule
-				if (np.abs(history[c][self.__early_stop['monitor']][epoch] -
-						history[c][self.__early_stop['monitor']][epoch-1]) <=
+				if self.__early_stop['monitor']:
+					if (history[c][self.__early_stop['monitor']][epoch] -
+						history[c][self.__early_stop['monitor']][epoch-1] <=
 													self.__early_stop['delta']):
 
-					self.__early_stop['times'][c] += 1
+						self.__early_stop['times'][c] += 1
 
-					if self.__early_stop['times'][c] >= self.__early_stop['patience']:
-						train = False # Stop training
+						if (self.__early_stop['times'][c] >=
+												self.__early_stop['patience']):
+							train = False # Stop training
 
-						if kwargs['verbose']:
-							print('Client {} - After {} epochs without '\
+							if kwargs['verbose']:
+								print('Client {} - After {} epochs without '\
 								'improvements, training will be stopped'.format(
 											c, self.__early_stop['patience']))
-				else:
-					self.__early_stop['times'][c] = 0
+					else:
+						self.__early_stop['times'][c] = 0
 
 			# Perform agregation and global feature representation learning
 			asyncUpd(global_model=self._global_model,

@@ -6,7 +6,8 @@
 ###############################################################################
 
 # Imported modules
-from tensorflow.keras import Model, Layer
+from tensorflow.keras import Model
+from tensorflow.keras.layers import Layer
 
 def fedAvg(models: list, samp_per_models: list, output_model: Model):
 
