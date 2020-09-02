@@ -6,6 +6,7 @@
 ###############################################################################
 
 # Imported modules
+import numpy as np
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Layer
 
@@ -67,9 +68,13 @@ def asyncUpd(global_model: Model, client_models: list, pre_client_models: list,
 					any(not isinstance(x, Model) for x in pre_client_models)):
 		raise ValueError('"pre_client_models" should be a list of keras models')
 
+	if len(client_models) != len(pre_client_models):
+		raise ValueError('"client_models" and "pre_client_models" lists must '\
+						'have the same length')
+
 	if (not isinstance(samp_per_models, list) or
 				any(not isinstance(x, int) for x in samp_per_models) or
-				len(models) != len(samp_per_models)):
+				len(client_models) != len(samp_per_models)):
 		raise ValueError('"samp_per_models" should be a list of int with'\
 						' the same length as "models"')
 
@@ -83,7 +88,7 @@ def asyncUpd(global_model: Model, client_models: list, pre_client_models: list,
 	total_samples = float(sum(samp_per_models))
 
 	# Agregates weights of clients over the output model
-	for c in range(1, len(models)):
+	for c in range(len(client_models)):
 
 		for l in range(len(output_model.layers)):
 			w_length = len(client_models[c].get_layer(index=l).get_weights())
@@ -112,9 +117,9 @@ def globFeatRep(layer: Layer):
 	layer_wghts, layer_bias = layer.get_weights()
 
 	exp_alpha_wghts = np.exp(layer_wghts)
-	sum_exp = np.sum(exp_alpha_wghts, axis=len(exp_alpha_wghts.shape) - 1)
+	sum_exp = np.sum(exp_alpha_wghts, axis=-1)
 
-	alpha_wghts = exp_alpha_wghts / sum_exp
+	alpha_wghts = exp_alpha_wghts / np.expand_dims(sum_exp, axis=-1)
 
 	## Compute the global feature representation of layer
 	layer.set_weights([layer_wghts*alpha_wghts, layer_bias])

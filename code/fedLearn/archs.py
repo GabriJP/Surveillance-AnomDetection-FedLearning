@@ -7,12 +7,15 @@
 ###############################################################################
 
 # Imported modules
+from os import remove
+from os.path import isfile
 from copy import copy, deepcopy
 import numpy as np
 from tensorflow.keras import Model
-from tensorflow.keras.models import clone_model
+from tensorflow.keras.models import clone_model, load_model
 import tensorflow.keras.backend as K
 from .agr_methods import fedAvg, asyncUpd, globFeatRep
+from .asynOnLocalUpdate import AsynOnLocalUpdate
 
 
 class FedLearnModel:
@@ -98,6 +101,21 @@ class FedLearnModel:
 		if ('rest_best_weights' in params and
 							not isinstance(params['rest_best_weights'], bool)):
 			raise TypeError('"rest_best_weights" must be boolean')
+
+	def _check_backup_params(params: dict):
+
+		if params['filename'] and not isinstance(params['filename'], str):
+			raise TypeError('"backup_filename" must be str')
+
+		if not isinstance(params['epochs'], int):
+			raise TypeError('The number of epochs to make a backup must be int')
+
+		if params['epochs'] <= 0:
+			raise ValueError('The number of epochs to make a backup must be'\
+								' greater than 0')
+
+		if not isinstance(params['save_only_weights'], bool):
+			raise TypeError('save_only_weights for backup schedule must be bool')
 
 	### Getters ###
 
@@ -206,8 +224,27 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 
 		SynFedAvgLearnModel._check_early_stop_params(self.__early_stop)
 
+		# Get the backup schedule
+		self.__backup = dict()
+		self.__backup['filename'] = (kwargs['backup_filename'] if 'backup_filename' in kwargs else None)
+		self.__backup['epochs'] = (kwargs['backup_epochs'] if 'backup_epochs' in kwargs else 5)
+		self.__backup['save_only_weights'] = (kwargs['backup_save_only_weights'] if 'backup_save_only_weights' in kwargs else True)
+
+		SynFedAvgLearnModel._check_backup_params(self.__backup)
+
 		# Save the history of models
 		history = dict() #{c:dict() for c in self._client_model}
+
+		# Load a previous backup model
+		if self.__backup['filename'] and isfile(self.__backup['filename']):
+			if self.__backup['save_only_weights']:
+				self.global_model.load_weights(self.__backup['filename'])
+			else:
+				self.global_model = load_model(self.__backup['filename'])
+
+			if kwargs['verbose']:
+				print('Loading a previous backup model found at "{}"'.format(
+													self.__backup['filename']))
 
 		for epoch in range(n_epochs):
 
@@ -216,6 +253,18 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 
 			if kwargs['verbose']:
 				print('Epoch "{}":'.format(epoch))
+
+			# Make a backup
+			if (self.__backup['filename'] and epoch > 0 and
+						epoch % self.__backup['epochs'] == 0):
+
+				if kwargs['verbose']:
+					print('Saving global model backup at epoch "{}":'.format(epoch))
+
+				if self.__backup['save_only_weights']:
+					self.global_model.save_weights(self.__backup['filename'])
+				else:
+					self.global_model.save(self.__backup['filename'])
 
 			# Copy weights from global model to clients models
 			for c in self._client_model:
@@ -305,6 +354,10 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 					samp_per_models=samp_per_client,
 					output_model=self._global_model)
 
+		# Remove backup model as it's no longer needed
+		if self.__backup['filename'] and isfile(self.__backup['filename']):
+			remove(self.__backup['filename'])
+
 		return history
 
 class AsynFedLearnModel(FedLearnModel):
@@ -353,6 +406,44 @@ class AsynFedLearnModel(FedLearnModel):
 		# Last iteration in which each clients sent an update to the server
 		self.__last_it_cli = {c: 0 for c in self._client_model}
 
+		self.__optimizer_clients = []
+
+	def compile(self, **kwargs):
+
+		# Check input
+		if 'lamb' not in kwargs:
+			raise AttributeError('lamb value must be passed as float')
+
+		if 'beta' not in kwargs:
+			raise AttributeError('beta value must be passed')
+
+		# Save the compilation parameters
+		self._comp_params = kwargs
+
+		# Prepare the Asynchronous on Local Update Optimizer
+		original_optimizer = kwargs.pop('optimizer')
+		lamb = kwargs.pop('lamb')
+		beta = kwargs.pop('beta')
+
+		# Perform compilation
+		#super(AsynFedLearnModel, self).compile(optimizer=opt, **kwargs)
+
+		# Compile the global model
+		self._global_model.compile(optimizer=original_optimizer,
+									**deepcopy(kwargs))
+
+		# Compile the clients models
+		for client in self._client_model:
+			self.__optimizer_clients.append(
+					AsynOnLocalUpdate(optimizer=original_optimizer,
+									global_model_W=self.global_model.weights,
+									lamb=lamb,
+									beta=beta))
+
+			# Compile and add the gradient transformator to the client
+			self._client_model[client].compile(
+					optimizer=self.__optimizer_clients[-1],
+					**deepcopy(kwargs))
 
 	def fit(self, **kwargs):
 
@@ -392,6 +483,11 @@ class AsynFedLearnModel(FedLearnModel):
 		self.__early_stop['delta'] = (kwargs['early_stop_delta'] if
 									 	'early_stop_delta' in kwargs else 1e-7)
 		self.__early_stop['times'] = {c: 0 for c in self._client_model}
+		self.__early_stop['best'] = {c: None for c in self._client_model}
+
+		self.__early_stop['rest_best_weights'] = (
+										kwargs['early_stop_rest_best_weights']
+						if 'early_stop_rest_best_weights' in kwargs else False)
 
 		AsynFedLearnModel._check_early_stop_params(self.__early_stop)
 
@@ -444,7 +540,7 @@ class AsynFedLearnModel(FedLearnModel):
 				    shuffle=kwargs['shuffle'] if 'shuffle' in kwargs else True,
 				    class_weight=kwargs['class_weight'] if 'class_weight' in kwargs else None,
 				    sample_weight=kwargs['sample_weight'] if 'sample_weight' in kwargs else None,
-				    initial_epoch=kwargs['initial_epoch'] if 'initial_epoch' in kwargs else 0,
+				    #initial_epoch=kwargs['initial_epoch'] if 'initial_epoch' in kwargs else 0,
 				    steps_per_epoch=kwargs['steps_per_epoch'] if 'steps_per_epoch' in kwargs else None,
 				    validation_steps=kwargs['validation_steps'] if 'validation_steps' in kwargs else None,
 				    #validation_batch_size=kwargs['validation_batch_size'] if 'validation_batch_size' in kwargs else None,
@@ -468,8 +564,9 @@ class AsynFedLearnModel(FedLearnModel):
 
 				# Execute early stopping schedule
 				if self.__early_stop['monitor']:
-					if (history[c][self.__early_stop['monitor']][epoch] -
-						history[c][self.__early_stop['monitor']][epoch-1] <=
+					if (self.__early_stop['best'][c] is not None and
+						-(history[c][self.__early_stop['monitor']][epoch] -
+								self.__early_stop['best'][c]) <=
 													self.__early_stop['delta']):
 
 						self.__early_stop['times'][c] += 1
@@ -482,8 +579,23 @@ class AsynFedLearnModel(FedLearnModel):
 								print('Client {} - After {} epochs without '\
 								'improvements, training will be stopped'.format(
 											c, self.__early_stop['patience']))
+
+							# Restore weight of all client models if restore
+							# best weight is set
+							if self.__early_stop['rest_best_weights']:
+								for i in self._client_model:
+									self._client_model[i].set_weights(
+												self._client_best_weights[i])
+
+							break
 					else:
 						self.__early_stop['times'][c] = 0
+						self.__early_stop['best'][c] = (history[c]
+										[self.__early_stop['monitor']][epoch])
+
+						if self.__early_stop['rest_best_weights']:
+							# Save client's weight if improvement
+							self._client_best_weights[c] = self._client_model[c].get_weights()
 
 			# Perform agregation and global feature representation learning
 			asyncUpd(global_model=self._global_model,

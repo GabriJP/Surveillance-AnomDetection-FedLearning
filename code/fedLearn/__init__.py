@@ -1,1 +1,2 @@
-from fedLearn.archs import SynFedAvgLearnModel
+from fedLearn.archs import SynFedAvgLearnModel, AsynFedLearnModel
+from fedLearn.asynOnLocalUpdate import AsynOnLocalUpdate
