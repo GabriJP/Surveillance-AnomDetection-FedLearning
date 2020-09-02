@@ -238,9 +238,9 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 		# Load a previous backup model
 		if self.__backup['filename'] and isfile(self.__backup['filename']):
 			if self.__backup['save_only_weights']:
-				self.global_model.load_weights(self.__backup['filename'])
+				self._global_model.load_weights(self.__backup['filename'])
 			else:
-				self.global_model = load_model(self.__backup['filename'])
+				self._global_model = load_model(self.__backup['filename'])
 
 			if kwargs['verbose']:
 				print('Loading a previous backup model found at "{}"'.format(

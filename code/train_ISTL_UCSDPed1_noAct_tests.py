@@ -130,7 +130,7 @@ for p in params:
 			1: train_split[1]}
 
 	# Stochastic gradient descent algorithm
-	adam = Adam(lr=1e-4, decay=2.5e-5, epsilon=1e-6)
+	adam = Adam(lr=1e-4, decay=5e-3, epsilon=1e-6)
 
 
 	istl_fed_model = SynFedAvgLearnModel(build_fn=istl.build_ISTL, n_clients=2,
@@ -150,7 +150,7 @@ for p in params:
 						early_stop_delta=p['early_stop_delta'] if 'early_stop_delta' in p else 1e-6,
 						early_stop_rest_best_weights = True,
 						backup_filename='backup.h5',
-						backup_epochs=1,
+						backup_epochs=10,
 						backup_save_only_weights=False,
 						verbose=2,
 						shuffle=False)

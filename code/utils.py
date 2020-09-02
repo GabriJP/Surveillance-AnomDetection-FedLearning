@@ -219,7 +219,7 @@ def plot_results(results: dict, metric: str, filename: str):
 
 	# Imprimir cada gráfica
 	for r in results:
-		plt.plot(results[r])
+		plt.plot(results[r], label=r)
 
 	# Mostrar leyenda
 	plt.title(metric)
