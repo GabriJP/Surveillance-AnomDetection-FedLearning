@@ -426,6 +426,73 @@ class CuboidsGenerator(Sequence):
 
 		return tuple(cubgens)
 
+	def take_subpartition(self, port: float, seed=None):
+
+		"""Split the current generator into two generators, containing the first
+			one, a random subpartition of the current generator and the second
+			one the remained cuboids
+
+			Parameters:
+			-----------
+			port : float
+				Portion of the original cuboids to select for the subpartition
+
+			seed : int
+				The seed to be used for the subpartition's random selection
+		"""
+
+		# Check input
+		if not isinstance(port, float):
+			raise TypeError('The portion for the subpartition must be float')
+
+		if port <= 0 or port >= 1:
+			raise ValueError('The portion for the subpartition must be in (0, 1)')
+
+		if seed is not None and not isinstance(seed, int):
+			raise TypeError('The seed must be None or integer')
+
+		if seed is not None and seed <= 0:
+			raise ValueError('The seed must be greater than 0')
+
+		# Procedure
+		cubgens = tuple(deepcopy(self) for i in range(2))
+		cubgens[0]._cuboids_info = []
+
+
+		part_size = int(port * len(self))
+		sel_index = set()
+
+		# Change the seed is specified
+		if seed is not None:
+			or_rand_state = random.getstate()
+			random.seed(seed)
+
+		# Select a random subpartition
+		for i in range(part_size):
+
+			idx = None
+
+			while idx is None or idx in sel_index:
+				idx = random.randint(0, len(cubgens[1]._cuboids_info) - 1)
+
+			cubgens[0]._cuboids_info.append(self._cuboids_info[idx])
+			del cubgens[1]._cuboids_info[idx]
+
+			sel_index.add(idx)
+
+		# Recover the original random state
+		if seed is not None:
+			random.setstate(or_rand_state)
+
+		# Update the partition's video information
+		for cub in cubgens:
+			cub._cuboids = None
+			cub.__loaded_cub_range = [None, None]
+			cub._access_cuboids = cub._cuboids_info
+			cub._update_video_info()
+
+		return cubgens
+
 	def merge(*args):
 
 		"""Merge several Cuboids Generators into one single Cuboids Generator
