@@ -51,7 +51,7 @@ parser = argparse.ArgumentParser(description='Make graphs for the main '\
 						'each pair of anomaly and '\
 						' temporal thresholds')
 parser.add_argument('-r', '--results', help='JSON file containing the '\
-					' performance metrics', type=str)
+					' performance metrics', type=str, required=True)
 
 args = parser.parse_args()
 
@@ -78,7 +78,7 @@ results = get_results_data(results_data)
 ## Draw graphs performance
 if results:
 	results = pd.DataFrame.from_records(results, exclude=('confusion matrix',
-													'reconstruction_error'))
+													'reconstruction_error_norm'))
 
 	for y in ('accuracy', 'precision',	'recall', 'specificity', 'AUC', 'EER',
 																	'f1 score'):

@@ -10,6 +10,7 @@ from sys import float_info
 import numpy as np
 from sklearn.metrics import roc_curve
 import matplotlib.pyplot as plt
+from tensorflow.keras import backend as K
 
 def cum_sum(arr):
 
@@ -230,3 +231,11 @@ def plot_results(results: dict, metric: str, filename: str):
 	plt.savefig(filename)
 
 	plt.close() # Cerrar la figura una vez terminado
+
+def root_sum_squared_error(y_true, y_pred):
+
+	if K.ndim(y_true) > 2:
+		return K.mean(K.sqrt(K.sum(K.square(y_true - y_pred),
+					axis=K.arange(1, K.ndim(y_true)) )))
+	else:
+		return K.sqrt(K.sum(K.square(y_true - y_pred)))

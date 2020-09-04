@@ -27,9 +27,9 @@ from copy import deepcopy
 import numpy as np
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow import config
+from tensorflow import config, random
 from cv2 import resize, cvtColor, COLOR_BGR2GRAY
-from utils import extract_experiments_parameters, plot_results
+from utils import extract_experiments_parameters, plot_results, root_sum_squared_error
 from fedLearn import SynFedAvgLearnModel
 from models import istl
 
@@ -106,6 +106,7 @@ for p in params:
 
 	if 'seed' in p:
 		np.random.seed(p['seed'])
+		random.set_random_seed(p['seed'])
 
 	# Prepare the data train and make partitions
 	train_split = data_train.make_partitions(p['partitions'])
@@ -121,7 +122,8 @@ for p in params:
 
 	istl_fed_model = SynFedAvgLearnModel(build_fn=istl.build_ISTL, n_clients=2,
 										cub_length=CUBOIDS_LENGTH)
-	istl_fed_model.compile(optimizer=adam, loss='mean_squared_error')
+	istl_fed_model.compile(optimizer=adam, loss='mean_squared_error',
+							metrics=[root_sum_squared_error])
 
 
 
@@ -161,6 +163,9 @@ for p in params:
 						backup_save_only_weights=False,
 						verbose=2,
 						shuffle=False)
+
+	hist1_rec = {c: hist1[c]['root_sum_squared_error'] for c in hist1}
+	hist1_val_rec = {c: hist1[c]['val_root_sum_squared_error'] for c in hist1}
 	hist1_val = {c: hist1[c]['val_loss'] for c in hist1}
 	hist1 = {c: hist1[c]['loss'] for c in hist1}
 
@@ -177,6 +182,12 @@ for p in params:
 			model_base_filename +
 			'ISTL_1st_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)+1))
 
+		plot_results({'RSSE - training': hist1_rec[c],
+						'RSSE - validation': hist1_val_rec[c]},
+			'Root of the Sum of Squared Errors - 1st iteration - client #{}'.format(c),
+			model_base_filename +
+			'ISTL_1st_iteration_client{}_RSSE_train_loss_exp={}.pdf'.format(c, len(results)+1))
+
 		np.savetxt(model_base_filename +
 			'ISTL_1st_iteration_client{}_MSE_loss_exp={}.txt'.format(c, len(results)+1),
 					hist1[c])
@@ -184,6 +195,14 @@ for p in params:
 		np.savetxt(model_base_filename +
 			'ISTL_1st_iteration_client{}_MSE_val_loss_exp={}.txt'.format(c, len(results)+1),
 					hist1_val[c])
+
+		np.savetxt(model_base_filename +
+			'ISTL_1st_iteration_client{}_RSSE_loss_exp={}.txt'.format(c, len(results)+1),
+					hist1_rec[c])
+
+		np.savetxt(model_base_filename +
+			'ISTL_1st_iteration_client{}_RSSE_val_loss_exp={}.txt'.format(c, len(results)+1),
+					hist1_val_rec[c])
 
 	## Perform the second and third iteration for each combination of anomaly
 	## thresholds and temporal thresholds
@@ -211,7 +230,16 @@ for p in params:
 			split.batch_size = 1
 			split.return_cub_as_label = False
 
-		evaluator.fit(istl.generators.CuboidsGenerator.merge(train_split[0], train_split[1]))
+		train_rec_error = evaluator.fit(istl.generators.CuboidsGenerator.merge(
+															train_split[0],
+															train_split[1]))
+
+		q['training_rec_errors'] = {'1st iteration': {
+											'mean': train_rec_error.mean(),
+											'std': train_rec_error.std(),
+											'min': train_rec_error.min(),
+											'max': train_rec_error.max()
+										}}
 
 		q['results'] = {}
 		q['results']['2nd iteration'] = {}
@@ -237,20 +265,19 @@ for p in params:
 
 			# Set data augmentation
 			data[c].augment_data(max_stride=3)
-			data[c].shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
-									seed=p['seed'] if 'seed' in p else time.time())
 
 		for c in data:
 			evaluator.clear()
 
-			meas = evaluator.evaluate_cuboids(data[c], [0]*len(data[c]))
+			train_test = istl.generators.ConsecutiveCuboidsGen(data[c])
+			meas = evaluator.evaluate_cuboids(train_test, [0]*len(train_test))
 			print('Evaluation of second iteration client set {} founding {} '\
 				' false positive cuboids\n{}'.format(c, len(evaluator), meas))
 
 			q['results']['2nd iteration'][c] = {'fp cuboids': len(evaluator),
 													'measures': meas}
 
-			if not q['force_relearning'] or len(evaluator):
+			if not q['force_relearning']:
 				data[c] = evaluator.fp_cuboids if len(evaluator) else None
 			else:
 				print('Training with all samples despite no false positive has'\
@@ -286,6 +313,9 @@ for p in params:
 					verbose=2,
 					shuffle=False)
 
+
+			hist2_rec = {c: hist2[c]['root_sum_squared_error'] for c in hist2}
+			hist2_val_rec = {c: hist2[c]['val_root_sum_squared_error'] for c in hist2}
 			hist2_val = {c: hist2[c]['val_loss'] for c in hist2}
 			hist2 = {c: hist2[c]['loss'] for c in hist2}
 
@@ -298,9 +328,15 @@ for p in params:
 			for c in range(2):
 				plot_results({'MSE - training': hist2[c],
 								'MSE - validation': hist2_val[c]},
-					'Mean Squared Error - 2st iteration - client #{}'.format(c),
+					'Mean Squared Error - 2nd iteration - client #{}'.format(c),
 					model_base_filename +
-					'ISTL_2st_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)+1))
+					'ISTL_2nd_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)+1))
+
+				plot_results({'RSSE - training': hist2_rec[c],
+								'RSSE - validation': hist2_val_rec[c]},
+					'Root of the Sum of Squared Errors - 2nd iteration - client #{}'.format(c),
+					model_base_filename +
+					'ISTL_2nd_iteration_client{}_RSSE_train_loss_exp={}.pdf'.format(c, len(results)+1))
 
 				np.savetxt(model_base_filename +
 					'ISTL_2st_iteration_client{}_MSE_loss_exp={}.txt'.format(c, len(results)+1),
@@ -310,11 +346,33 @@ for p in params:
 					'ISTL_2st_iteration_client{}_MSE_val_loss_exp={}.txt'.format(c, len(results)+1),
 							hist2_val[c])
 
-			evaluator.fit(np.expand_dims(np.concatenate((data[0], data[1])), axis=1))
+				np.savetxt(model_base_filename +
+					'ISTL_2nd_iteration_client{}_RSSE_loss_exp={}.txt'.format(c, len(results)+1),
+							hist2_rec[c])
+
+				np.savetxt(model_base_filename +
+					'ISTL_2nd_iteration_client{}_RSSE_val_loss_exp={}.txt'.format(c, len(results)+1),
+							hist2_val_rec[c])
+
+			#evaluator.fit(np.expand_dims(np.concatenate((data[0], data[1])), axis=1))
+			train_rec_error = evaluator.fit(
+				istl.generators.CuboidsGenerator.merge(train_split[0],
+														train_split[1],
+														train_split[2],
+														train_split[3]))
+
+			q['training_rec_errors']['2nd iteration'] = {
+											'mean': train_rec_error.mean(),
+											'std': train_rec_error.std(),
+											'min': train_rec_error.min(),
+											'max': train_rec_error.max()
+										}
 
 		else:
 			hist2 = {c: [] for c in range(2)}
 			hist2_val = hist2
+			hist2_rec = hist2
+			hist2_val_rec = hist2
 			q['time']['2nd iteration'] = 0
 
 
@@ -340,8 +398,6 @@ for p in params:
 
 			# Set data augmentation
 			data[c].augment_data(max_stride=3)
-			data[c].shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
-									seed=p['seed'] if 'seed' in p else time.time())
 
 		# Evaluate performance and retrieve false positive cuboids
 		# to train with them
@@ -350,13 +406,14 @@ for p in params:
 		for c in data:
 			evaluator.clear()
 
-			meas = evaluator.evaluate_cuboids(data[c], [0]*len(data[c]))
+			train_test = istl.generators.ConsecutiveCuboidsGen(data[c])
+			meas = evaluator.evaluate_cuboids(train_test, [0]*len(train_test))
 			print('Evaluation of third iteration client set {} founding {} false positive'\
 					' cuboids\n{}'.format(c, len(evaluator), meas))
 
 			q['results']['3rd iteration'][c] = {'fp cuboids': len(evaluator),
 													'measures': meas}
-			if not q['force_relearning'] or len(evaluator):
+			if not q['force_relearning']:
 				data[c] = evaluator.fp_cuboids if len(evaluator) else None
 			else:
 				print('Training with all samples despite no false positive has'\
@@ -390,6 +447,9 @@ for p in params:
 					verbose=2,
 					shuffle=False)
 
+
+			hist3_rec = {c: hist3[c]['root_sum_squared_error'] for c in hist3}
+			hist3_val_rec = {c: hist3[c]['val_root_sum_squared_error'] for c in hist3}
 			hist3_val = {c: hist3[c]['val_loss'] for c in hist3}
 			hist3 = {c: hist3[c]['loss'] for c in hist3}
 
@@ -406,6 +466,12 @@ for p in params:
 					model_base_filename +
 					'ISTL_3rd_iteration_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)+1))
 
+				plot_results({'RSSE - training': hist3_rec[c],
+								'RSSE - validation': hist3_val_rec[c]},
+					'Root of the Sum of Squared Errors - 3rd iteration - client #{}'.format(c),
+					model_base_filename +
+					'ISTL_3rd_iteration_client{}_RSSE_train_loss_exp={}.pdf'.format(c, len(results)+1))
+
 				np.savetxt(model_base_filename +
 					'ISTL_3rd_iteration_client{}_MSE_loss_exp={}.txt'.format(c, len(results)+1),
 							hist3[c])
@@ -414,11 +480,28 @@ for p in params:
 					'ISTL_3rd_iteration_client{}_MSE_val_loss_exp={}.txt'.format(c, len(results)+1),
 							hist3_val[c])
 
-			evaluator.fit(np.expand_dims(np.concatenate((data[0], data[1])), axis=1))
+				np.savetxt(model_base_filename +
+					'ISTL_3rd_iteration_client{}_RSSE_loss_exp={}.txt'.format(c, len(results)+1),
+							hist3_rec[c])
+
+				np.savetxt(model_base_filename +
+					'ISTL_3rd_iteration_client{}_RSSE_val_loss_exp={}.txt'.format(c, len(results)+1),
+							hist3_val_rec[c])
+
+			#evaluator.fit(np.expand_dims(np.concatenate((data[0], data[1])), axis=1))
+			train_rec_error = evaluator.fit(data_train)
+			q['training_rec_errors']['3rd iteration'] = {
+											'mean': train_rec_error.mean(),
+											'std': train_rec_error.std(),
+											'min': train_rec_error.min(),
+											'max': train_rec_error.max()
+										}
 
 		else:
 			hist3 = {c: [] for c in range(2)}
 			hist3_val = hist3
+			hist3_rec = hist3
+			hist3_val_rec = hist3
 			q['time']['3rd iteration'] = 0
 
 		# Plot MSE of all iterations
@@ -437,6 +520,21 @@ for p in params:
 				'Mean Squared Error - client #{}'.format(c),
 				model_base_filename +
 				'ISTL_all_training_client{}_MSE_train_loss_exp={}.pdf'.format(c, len(results)))
+
+			plot_results({'RSSE - training': np.concatenate(
+															(hist1_rec[c],
+															hist2_rec[c],
+															hist3_rec[c]),
+															axis=0),
+						'RSSE - validation': np.concatenate(
+															(hist1_val_rec[c],
+															hist2_val_rec[c],
+															hist3_val_rec[c]),
+															axis=0)
+																},
+				'Root of the Sum of Squared Errors - client #{}'.format(c),
+				model_base_filename +
+				'ISTL_all_training_client{}_RSSE_train_loss_exp={}.pdf'.format(c, len(results)))
 
 		## Save model
 		if store_models:

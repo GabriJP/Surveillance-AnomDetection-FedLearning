@@ -25,7 +25,7 @@ import numpy as np
 from tensorflow.keras.models import clone_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import MeanSquaredError
-from tensorflow import config
+from tensorflow import config, random
 from cv2 import resize, cvtColor, COLOR_BGR2GRAY
 from utils import extract_experiments_parameters, plot_results
 from fedLearn import SynFedAvgLearnModel
@@ -105,6 +105,7 @@ for p in params:
 
 	if 'seed' in p:
 		np.random.seed(p['seed'])
+		random.set_random_seed(p['seed'])
 
 	# Prepare the data train and make partitions
 	#data_train.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
@@ -115,24 +116,28 @@ for p in params:
 	data_train.batch_size = p['batch_size'] if 'batch_size' in p else 1
 
 	# Split data for each client
-	train_split = data_train.make_partitions((0.5, 0.5))
+	train_split = data_train.make_partitions((0.4, 0.4, 0.1, 0.1))
 
 	# Augment the cuboids corresponding to the first partition
-	for split in train_split:
+	for split in train_split[:2]:
 		split.augment_data(max_stride=3)
+		split.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
+								seed=p['seed'] if 'seed' in p else time.time())
 
 	t_start = time.time()
 
 	print('Training with parameters: {}'.format(p))
 
 	#################    Model preparation    ################
-	data = {0: istl.generators.ConsecutiveCuboidsGen(train_split[0]),
-			1: istl.generators.ConsecutiveCuboidsGen(train_split[1])}
+	data = {0: train_split[0],
+			1: train_split[1]}
+	val_data = {0: train_split[2],
+				1: train_split[3]}
 
 	# Stochastic gradient descent algorithm
-	adam = Adam(lr=1e-4, decay=2.5e-5, epsilon=1e-6)
+	adam = Adam(lr=1e-4, decay=1e-5, epsilon=1e-6)
 
-	
+
 	istl_fed_model = SynFedAvgLearnModel(build_fn=istl.build_ISTL, n_clients=2,
 										cub_length=CUBOIDS_LENGTH)
 	istl_fed_model.compile(optimizer=adam, loss=MeanSquaredError())
@@ -144,11 +149,15 @@ for p in params:
 	#print('- {} samples'.format(len(data_train)))
 
 	hist = istl_fed_model.fit(x=data,
+						validation_data=val_data,
 						epochs=p['epochs'],
-						early_stop_monitor='loss',
+						early_stop_monitor='val_loss',
 						early_stop_patience=p['early_stop_patience'] if 'early_stop_patience' in p else 5,
 						early_stop_delta=p['early_stop_delta'] if 'early_stop_delta' in p else 1e-6,
 						early_stop_rest_best_weights = True,
+						backup_filename='backup.h5',
+						backup_epochs=10,
+						backup_save_only_weights=False,
 						verbose=2,
 						shuffle=False)
 
@@ -159,7 +168,8 @@ for p in params:
 
 	# Plot MSE
 	for c in range(2):
-		plot_results({'MSE - training': hist[c]['loss']},
+		plot_results({'MSE - training': hist[c]['loss'],
+						'MSE - validation': hist[c]['val_loss']},
 			'Mean Squared Error',
 			model_base_filename +
 			'ISTL_UCSDPed1_MSE_train_loss_client={}_exp={}.pdf'.format(c, len(results)+1))
@@ -167,6 +177,10 @@ for p in params:
 		np.savetxt(model_base_filename +
 			'ISTL_UCSDPed1_MSE_train_loss_client={}_exp={}.txt'.format(c, len(results)+1),
 					hist[c]['loss'])
+
+		np.savetxt(model_base_filename +
+			'ISTL_UCSDPed1_MSE_train_val_loss_client={}_exp={}.txt'.format(c, len(results)+1),
+					hist[c]['val_loss'])
 
 	## Save model
 	if store_models:
@@ -184,7 +198,14 @@ for p in params:
 	data_train.return_cub_as_label = False
 	data_train.batch_size = 1
 	data_train.shuffle(False)
-	evaluator.fit(istl.generators.ConsecutiveCuboidsGen(data_train))
+	train_rec_error = evaluator.fit(data_train)
+
+	p['training_rec_errors'] = {
+								'mean': train_rec_error.mean(),
+								'std': train_rec_error.std(),
+								'min': train_rec_error.min(),
+								'max': train_rec_error.max()
+							}
 
 	t_eval_end = time.time()
 	p['time']['test evaluation'] = (t_eval_end - t_eval_start)

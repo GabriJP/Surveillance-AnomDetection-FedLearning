@@ -335,7 +335,7 @@ class ScorerISTL:
 				min_value = self.__min_score_cub
 				max_value = self.__max_score_cub
 
-			ret = (ret - min_value)/max_value
+			ret = ((ret - min_value)/max_value, ret)
 
 		return ret
 
@@ -351,6 +351,8 @@ class ScorerISTL:
 
 		scores = self.score_cuboids(cub_set, False)
 		self.__min_score_cub, self.__max_score_cub = scores.min(), scores.max()
+
+		return scores
 
 
 class PredictorISTL(ScorerISTL):
@@ -445,7 +447,7 @@ class PredictorISTL(ScorerISTL):
 			Return: bool, True if anomaly, False otherwise
 		"""
 
-		return (self.score_cuboids(np.expand_dims(cuboid, axis=0), True) >
+		return (self.score_cuboids(np.expand_dims(cuboid, axis=0), True)[0] >
 															self.__anom_thresh)
 
 	def predict_cuboids(self, cub_set, return_scores=False) -> np.ndarray:
@@ -487,11 +489,11 @@ class PredictorISTL(ScorerISTL):
 		"""
 
 		# Get the reconstruction error of cuboid's collection
-		score = self.score_cuboids(cub_set, True)
+		score, true_score = self.score_cuboids(cub_set, True)
 		preds = PredictorISTL._predict_from_scores(score, self.__anom_thresh,
 													self.__temp_thresh)
 
-		return preds if not return_scores else (preds, score)
+		return preds if not return_scores else (preds, score, true_score)
 
 	def _predict_from_scores(score: np.ndarray,
 							anom_thresh: float or int, temp_thresh: int):
@@ -649,7 +651,8 @@ class EvaluatorISTL(PredictorISTL):
 			labels = np.array(labels)
 
 		# Predict all cuboids
-		pred, scores = self.predict_cuboids(cuboids, return_scores=True)
+		pred, scores, true_scores = self.predict_cuboids(cuboids,
+									return_scores=True)
 		"""
 		scores = np.array(
 		[self.score_cuboid(cuboids[i]) for i in range(len(cuboids))]).squeeze()
@@ -679,9 +682,10 @@ class EvaluatorISTL(PredictorISTL):
 					self.__fp_cuboids = self.__fp_cuboids[:self.__max_cuboids + 1]
 
 
-		return EvaluatorISTL._compute_perf_metrics(labels, pred, scores)
+		return EvaluatorISTL._compute_perf_metrics(labels, pred, scores,
+																	true_scores)
 
-	def _compute_perf_metrics(labels, pred, scores):
+	def _compute_perf_metrics(labels, pred, scores, true_scores=None):
 
 		# Compute performance metrics
 		cm = confusion_matrix(labels, pred)
@@ -722,12 +726,21 @@ class EvaluatorISTL(PredictorISTL):
 									'FN': int(cm[1, 0])
 								}
 
-		ret['reconstruction_error'] = {
+		ret['reconstruction_error_norm'] = {
 										'mean': scores.mean(),
 										'std': scores.std(),
 										'min': scores.min(),
 										'max': scores.max()
 									}
+
+		if true_scores is not None:
+			ret['reconstruction_error'] = {
+											'mean': true_scores.mean(),
+											'std': true_scores.std(),
+											'min': true_scores.min(),
+											'max': true_scores.max()
+										}
+
 
 		return ret
 
@@ -784,13 +797,19 @@ class EvaluatorISTL(PredictorISTL):
 			labels = np.array(labels)
 
 		# Predict all cuboids
-		scores = self.score_cuboids(cuboids, True)
+		scores, true_scores = self.score_cuboids(cuboids, True)
 		meas = {
-				'reconstruction_error': {
+				'reconstruction_error_norm': {
 						'mean': scores.mean(),
 						'std': scores.std(),
 						'min': scores.min(),
 						'max': scores.max()
+					},
+				'reconstruction_error': {
+						'mean': true_scores.mean(),
+						'std': true_scores.std(),
+						'min': true_scores.min(),
+						'max': true_scores.max()
 					},
 				'results': []
 		}
@@ -805,7 +824,7 @@ class EvaluatorISTL(PredictorISTL):
 				preds = PredictorISTL._predict_from_scores(scores, at, tt)
 				meas['results'][-1].update(
 						EvaluatorISTL._compute_perf_metrics(labels, preds,
-																		scores))
+															scores, true_scores))
 		return meas
 
 	def clear(self):
