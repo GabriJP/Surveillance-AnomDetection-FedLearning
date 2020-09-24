@@ -162,6 +162,7 @@ class FedLearnModel:
 
 		# Make a copy of the global and client models
 		new._global_model = clone_model(self._global_model)
+		new._global_model.set_weights(self._global_model.get_weights())
 		new._client_model = {c: clone_model(self._global_model)
 										for c in self._client_model}
 		new._client_best_weights = copy(self._client_best_weights)
@@ -197,6 +198,11 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 		super(SynFedAvgLearnModel, self).__init__(build_fn, n_clients, **kwargs)
 
 	def fit(self, **kwargs):
+
+		if ('callbacks' in kwargs and (not isinstance(kwargs['callbacks'], dict) or
+			any(not isinstance(kwargs['callbacks'][c], list) for c in kwargs['callbacks']) )):
+			raise TypeError('callbacks must be provided as a dict with a '\
+					'callback list for each client')
 
 		n_epochs = kwargs['epochs'] # Get number of epochs specified
 		train = True				# Flag for setting or stopping the training
@@ -252,7 +258,7 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 				break # Stop training
 
 			if kwargs['verbose']:
-				print('Epoch "{}":'.format(epoch))
+				print('Epoch "{}":'.format(epoch + 1))
 
 			# Make a backup
 			if (self.__backup['filename'] and epoch > 0 and
@@ -285,15 +291,15 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 				    x=kwargs['x'][c] if isinstance(kwargs['x'], dict) else kwargs['x'],
 				    y=(kwargs['y'][c] if isinstance(kwargs['y'], dict) else kwargs['y']) if 'y' in kwargs else None,
 				    batch_size=kwargs['batch_size'] if 'batch_size' in kwargs else None,
-				    epochs=1,
+				    epochs=epoch + 2,
 				    verbose=kwargs['verbose'] if 'verbose' in kwargs else 1,
-				    callbacks=None,
+				    callbacks=kwargs['callbacks'][c] if 'callbacks' in kwargs else None,
 				    validation_split=kwargs['validation_split'] if 'validation_split' in kwargs else 0.0,
 				    validation_data=(kwargs['validation_data'][c] if isinstance(kwargs['validation_data'], dict) else kwargs['validation_data']) if 'validation_data' in kwargs else None,
 				    shuffle=kwargs['shuffle'] if 'shuffle' in kwargs else True,
 				    class_weight=kwargs['class_weight'] if 'class_weight' in kwargs else None,
 				    sample_weight=kwargs['sample_weight'] if 'sample_weight' in kwargs else None,
-				    #initial_epoch=epoch-1 if epoch > 0 else 0,
+				    initial_epoch=epoch + 1,
 				    steps_per_epoch=kwargs['steps_per_epoch'] if 'steps_per_epoch' in kwargs else None,
 				    validation_steps=kwargs['validation_steps'] if 'validation_steps' in kwargs else None,
 				    #validation_batch_size=kwargs['validation_batch_size'] if 'validation_batch_size' in kwargs else None,
@@ -348,6 +354,11 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 						if self.__early_stop['rest_best_weights']:
 							# Save client's weight if improvement
 							self._client_best_weights[c] = self._client_model[c].get_weights()
+
+				# Check wheter any compatible callback has stopped the train
+				if 'callbacks' in kwargs:
+					if any(hasattr(callback, 'stop_training') and callback.stop_training for callback in kwargs['callbacks'][c]):
+						train = False
 
 			# Perform agregation
 			fedAvg(models=list(self._client_model.values()),

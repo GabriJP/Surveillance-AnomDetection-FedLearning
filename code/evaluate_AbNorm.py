@@ -14,9 +14,8 @@ import argparse
 import numpy as np
 from cv2 import imread, imwrite, resize, cvtColor, COLOR_BGR2GRAY
 import tensorflow
-from tensorflow.keras.models import load_model
-from models import istl
-from utils import root_sum_squared_error
+from keras.models import load_model
+#from models import istl
 
 if tensorflow.__version__.startswith('1'):
 	from tensorflow import ConfigProto, Session
@@ -32,13 +31,25 @@ else:
 #from tensorflow.keras import backend as K
 
 # Constants
-CUBOIDS_LENGTH = 8
-CUBOIDS_WIDTH = 224
-CUBOIDS_HEIGHT = 224
+CUBOIDS_LENGTH = 10
+CUBOIDS_WIDTH = 227
+CUBOIDS_HEIGHT = 227
 
 # Image resize function
 resize_fn = lambda img: np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY),
 						(CUBOIDS_WIDTH, CUBOIDS_HEIGHT))/255, axis=2)
+
+def norm_fn(img):
+
+	# Convert grayscale and rescale
+	img = np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY),
+						(CUBOIDS_WIDTH, CUBOIDS_HEIGHT)), axis=2)
+
+	# Normalize and clip
+	img = (img - img.mean()) / img.std()
+	img = img.clip(-1, 1)
+
+	return img
 
 ### Input Arguments
 parser = argparse.ArgumentParser(description='Test an Incremental Spatio'\
@@ -46,7 +57,7 @@ parser = argparse.ArgumentParser(description='Test an Incremental Spatio'\
 parser.add_argument('-m', '--model', help='A pretrained model stored on a'\
 					' h5 file', type=str)
 parser.add_argument('-c', '--train_folder', help='Path to folder'\
-					' containing the train dataset', type=str, nargs='?')
+					' containing the train dataset', type=str)
 parser.add_argument('-d', '--data_folder', help='Path to folder'\
 					' containing the test dataset', type=str)
 parser.add_argument('-l', '--labels', help='Path to file containing the test'\
@@ -59,9 +70,6 @@ parser.add_argument('-t', '--temp_threshold',
 					nargs='+')
 parser.add_argument('-o', '--output', help='Output file in which the results'\
 					' will be located', type=str)
-parser.add_argument('-n', '--norm_zero_one', help='Set the normalization between'\
-					' zero or one. Only valid for the evaluation per test'\
-					' sample', action='store_true')
 
 args = parser.parse_args()
 
@@ -72,7 +80,6 @@ labels_path = args.labels
 anom_threshold = args.anom_threshold
 temp_threshold = args.temp_threshold
 output = args.output
-norm_zero_one = args.norm_zero_one
 
 dot_pos = output.rfind('.')
 if dot_pos != -1:
@@ -83,30 +90,26 @@ else:
 
 ### Loads model
 try:
-	model = load_model(model_fn, custom_objects={'root_sum_squared_error':                   
-							root_sum_squared_error})
+	model = load_model(model_fn)
 except Exception as e:
 	print('Cannot load the model: ', str(e), file=sys.stderr)
 	exit(-1)
 
 
 ### Load the video test dataset
-if train_video_dir:
-	try:
-		data_train = istl.generators.CuboidsGeneratorFromImgs(
-										source=train_video_dir,
-										cub_frames=CUBOIDS_LENGTH,
-										prep_fn=resize_fn)
-	except Exception as e:
-		print('Cannot load {}: '.format(train_video_dir), str(e), file=sys.stderr)
-		exit(-1)
-else:
-	data_train = None
+try:
+	data_train = istl.generators.CuboidsGeneratorFromImgs(
+									source=train_video_dir,
+									cub_frames=CUBOIDS_LENGTH,
+									prep_fn=norm_fn)
+except Exception as e:
+	print('Cannot load {}: '.format(train_video_dir), str(e), file=sys.stderr)
+	exit(-1)
 
 try:
 	data_test = istl.generators.CuboidsGeneratorFromImgs(source=test_video_dir,
 									cub_frames=CUBOIDS_LENGTH,
-									prep_fn=resize_fn)
+									prep_fn=norm_fn)
 	data_test = istl.generators.ConsecutiveCuboidsGen(data_test)
 except Exception as e:
 	print('Cannot load {}: '.format(test_video_dir), str(e), file=sys.stderr)
@@ -118,38 +121,32 @@ except Exception as e:
 	print('Cannot load {}: '.format(labels_path), str(e), file=sys.stderr)
 	exit(-1)
 
+# Fit training
+scores_train = np.zeros(len(data_train))
+for i in range(len(data_train)):
+	scores_train[i] = models.predict(data_train[i].moveaxis(1, -1))
+
+# Test
+scores_test = np.zeros(len(data_test))
+for i in range(len(data_test)):
+	scores_test[i] = models.predict(data_test[i].moveaxis(1, -1))
+
+# Normalize test scores
+scores_test_norm = (scores_test - scores_train.min()) / scores_train.max()
+
 ### Testing for each pair of anomaly and temporal values combinations
 print('Performing evaluation with all anomaly and temporal '\
 		'thesholds combinations')
-evaluator = istl.EvaluatorISTL(model=model,
-									cub_frames=CUBOIDS_LENGTH,
-									# It's required to put any value
-									anom_thresh=0.1,
-									temp_thresh=1)
+all_meas = []
+for at in anom_threshold:
+	for tt in temp_threshold:
 
-if data_train is not None:
-	sc_train = evaluator.fit(data_train)
+		meas = {'anom_threshold': anom_threshold, 'temp_threshold': temp_threshold}
 
-try:
-	scale = data_test.cum_cuboids_per_video if data_train is None else None
+		pred = istl.EvaluatorISTL._predict_from_scores(scores_test_norm, 0.33, 50)
 
-	all_meas = evaluator.evaluate_cuboids_range_params(data_test,
-											test_labels,
-											anom_threshold,
-											temp_threshold,
-											scale,
-											norm_zero_one)
-except Exception as e:
-	print(str(e))
-	exit(-1)
-
-if data_train is not None:
-	all_meas['training_rec_error'] = {
-									'mean': sc_train.mean(),
-									'std': sc_train.std(),
-									'min': sc_train.min(),
-									'max': sc_train.max()
-									}
+		meas.update(istl.EvaluatorISTL._compute_perf_metrics(
+					test_labels, pred, scores_test_norm, scores_test))
 
 # Save the results
 with open(results_fn, 'w') as f:

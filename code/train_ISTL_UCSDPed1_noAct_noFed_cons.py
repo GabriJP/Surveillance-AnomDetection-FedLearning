@@ -118,8 +118,8 @@ for p in params:
 
 		# Augment the cuboids
 		data_train.augment_data(max_stride=3)
-		data_train.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
-									seed=p['seed'] if 'seed' in p else time.time())
+		amp_data_train = istl.generators.ConsecutiveCuboidsGen(data_train)
+
 
 		t_start = time.time()
 
@@ -128,8 +128,7 @@ for p in params:
 		#################    Model preparation    ################
 
 		# Stochastic gradient descent algorithm
-		adam = Adam(lr=1e-4, decay=p['lr_decay'] if 'lr_decay' in p else 0,
-					epsilon=1e-6)
+		adam = Adam(lr=1e-4, decay=1e-5, epsilon=1e-6)
 
 		istl_model = istl.build_ISTL(cub_length=CUBOIDS_LENGTH)
 		istl_model.compile(optimizer=adam, loss=MeanSquaredError(),
@@ -141,15 +140,9 @@ for p in params:
 		print('Training')
 		#print('- {} samples'.format(len(data_train)))
 
-		epochs = p['epochs'] if 'epochs' in p else 1
-
-		hist = istl_model.fit(x=data_train, epochs=epochs,
-							#callbacks=[EarlyStopping(monitor='loss', patience=5,
-							#						min_delta=1e-10)],
-							callbacks=[ModelCheckpoint(filepath='backup.h5',
-														monitor='loss',
-														save_freq=20 * epochs,
-														verbose=1)],
+		hist = istl_model.fit(x=amp_data_train, epochs=p['epochs'],
+							callbacks=[EarlyStopping(monitor='loss', patience=5,
+													min_delta=1e-6)],
 							verbose=2,
 							shuffle=False)
 		# 										ModelCheckpoint(filepath='backup.h5',
@@ -201,8 +194,8 @@ for p in params:
 
 		data_train.return_cub_as_label = False
 		data_train.batch_size = 1
-		data_train.shuffle(False)
-		train_rec_error = evaluator.fit(data_train)
+		amp_data_train = istl.generators.ConsecutiveCuboidsGen(data_train)
+		train_rec_error = evaluator.fit(amp_data_train)
 
 		p['training_rec_errors'] = {
 									'mean': train_rec_error.mean(),

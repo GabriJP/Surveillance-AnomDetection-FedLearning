@@ -13,7 +13,7 @@
 			In this case, active learning is not applied, so training data will
 			not be partitioned and training will be performed on offline.
 
-@usage: train_ISTL_UCSDPed1_noAct_noFed.py -d <JSON document experiment> [-s]
+@usage: train_ISTL_UCSDPed1_noAct_noFed_val_cons.py -d <JSON document experiment> [-s]
 """
 
 # Modules imported
@@ -104,6 +104,8 @@ for p in params:
 			np.random.seed(p['seed'])
 			random.set_random_seed(p['seed'])
 
+		port_val = p['port_val'] if 'port_val' in p else 0.1
+
 		# Prepare the data train and make partitions
 		#data_train.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
 		#						seed=p['seed'] if 'seed' in p else time.time())
@@ -115,11 +117,14 @@ for p in params:
 													prep_fn=resize_fn)
 		data_train.return_cub_as_label = True
 		data_train.batch_size = p['batch_size'] if 'batch_size' in p else 1
+		data_train, data_val = data_train.make_partitions((1 - port_val,
+																	port_val))
 
 		# Augment the cuboids
 		data_train.augment_data(max_stride=3)
-		data_train.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
-									seed=p['seed'] if 'seed' in p else time.time())
+		amp_data_train = istl.generators.ConsecutiveCuboidsGen(data_train)
+		amp_data_val = istl.generators.ConsecutiveCuboidsGen(data_val)
+
 
 		t_start = time.time()
 
@@ -128,8 +133,7 @@ for p in params:
 		#################    Model preparation    ################
 
 		# Stochastic gradient descent algorithm
-		adam = Adam(lr=1e-4, decay=p['lr_decay'] if 'lr_decay' in p else 0,
-					epsilon=1e-6)
+		adam = Adam(lr=1e-4, decay=1e-5, epsilon=1e-6)
 
 		istl_model = istl.build_ISTL(cub_length=CUBOIDS_LENGTH)
 		istl_model.compile(optimizer=adam, loss=MeanSquaredError(),
@@ -141,15 +145,10 @@ for p in params:
 		print('Training')
 		#print('- {} samples'.format(len(data_train)))
 
-		epochs = p['epochs'] if 'epochs' in p else 1
-
-		hist = istl_model.fit(x=data_train, epochs=epochs,
-							#callbacks=[EarlyStopping(monitor='loss', patience=5,
-							#						min_delta=1e-10)],
-							callbacks=[ModelCheckpoint(filepath='backup.h5',
-														monitor='loss',
-														save_freq=20 * epochs,
-														verbose=1)],
+		hist = istl_model.fit(x=amp_data_train, epochs=p['epochs'],
+							validation_data=amp_data_val,
+							callbacks=[EarlyStopping(monitor='val_loss', patience=5,
+													min_delta=1e-6)],
 							verbose=2,
 							shuffle=False)
 		# 										ModelCheckpoint(filepath='backup.h5',
@@ -157,6 +156,8 @@ for p in params:
 			#											save_freq='epoch',
 			#											verbose=1)
 
+		hist_val_rec = hist.history['val_root_sum_squared_error']
+		hist_val = hist.history['val_loss']
 		hist_rec = hist.history['root_sum_squared_error']
 		hist = hist.history['loss']
 
@@ -166,7 +167,7 @@ for p in params:
 																['Training']))
 
 		# Plot MSE
-		plot_results({'MSE': hist},
+		plot_results({'MSE - Training': hist, 'MSE - Validation': hist_val},
 			'Mean Squared Error',
 			model_base_filename +
 			'ISTL_MSE_train_loss_exp={}.pdf'.format(len(results)+1))
@@ -175,9 +176,13 @@ for p in params:
 			'ISTL_MSE_train_loss_exp={}.txt'.format(len(results)+1),
 					hist)
 
+		np.savetxt(model_base_filename +
+			'ISTL_MSE_val_loss_exp={}.txt'.format(len(results)+1),
+					hist_val)
 
 		# Plot RSSE
-		plot_results({'RSSE': hist_rec},
+		plot_results({'RSSE - Training': hist_rec,
+						'RSSE - Validation': hist_val_rec},
 			'Root of the Sum of Squared Errors',
 			model_base_filename +
 			'ISTL_RSSE_train_loss_exp={}.pdf'.format(len(results)+1))
@@ -185,6 +190,10 @@ for p in params:
 		np.savetxt(model_base_filename +
 			'ISTL_RSSE_train_loss_exp={}.txt'.format(len(results)+1),
 					hist_rec)
+
+		np.savetxt(model_base_filename +
+			'ISTL_RSSE_validation_loss_exp={}.txt'.format(len(results)+1),
+					hist_val_rec)
 
 		## Save model
 		if store_models:
@@ -201,8 +210,8 @@ for p in params:
 
 		data_train.return_cub_as_label = False
 		data_train.batch_size = 1
-		data_train.shuffle(False)
-		train_rec_error = evaluator.fit(data_train)
+		amp_data_train = istl.generators.ConsecutiveCuboidsGen(data_train)
+		train_rec_error = evaluator.fit(amp_data_train)
 
 		p['training_rec_errors'] = {
 									'mean': train_rec_error.mean(),
@@ -229,6 +238,7 @@ for p in params:
 
 	except Exception as e:
 		p['results'] = 'Failed to execute the experiment: ' + str(e)
+		raise
 
 	results.append(p)
 

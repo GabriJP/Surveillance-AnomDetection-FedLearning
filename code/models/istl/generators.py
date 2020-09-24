@@ -459,7 +459,7 @@ class CuboidsGenerator(Sequence):
 		cubgens[0]._cuboids_info = []
 
 
-		part_size = int(port * len(self))
+		part_size = int(port * len(self._access_cuboids))
 		sel_index = set()
 
 		# Change the seed is specified
@@ -543,6 +543,16 @@ class CuboidsGenerator(Sequence):
 			Note: Function not implemented
 		"""
 		raise NotImplementedError()
+
+	@property
+	def cum_cuboids_per_video(self):
+		cub_per_vid = list(np.ceil(v['frames'] / self.__cub_frames) 
+							for v in self._video_info)
+
+		for i in range(1, len(cub_per_vid)):
+			cub_per_vid[i] += cub_per_vid[i-1]
+
+		return tuple(cub_per_vid)
 
 class CuboidsGeneratorFromImgs(CuboidsGenerator):
 
@@ -1120,7 +1130,7 @@ class ConsecutiveCuboidsGen(Sequence):
 		"""
 
 		self.__video_info[0]['cum frames'] = self.__video_info[0]['frames']
-		self.__access_frames[0] =  self.__video_info[0]['frames'] - cub_gen.cub_frames
+		self.__access_frames[0] =  max(1, self.__video_info[0]['frames'] - cub_gen.cub_frames)
 
 
 		if self.__video_info[0]['frames'] % cub_gen.cub_frames != 0:
@@ -1138,8 +1148,8 @@ class ConsecutiveCuboidsGen(Sequence):
 										 self.__video_info[i]['frames'])
 
 			self.__access_frames[i] = (self.__access_frames[i-1] + 
-										self.__video_info[i]['frames'] -
-										cub_gen.cub_frames)
+										max(1, self.__video_info[i]['frames'] -
+										cub_gen.cub_frames))
 
 			if self.__video_info[i]['frames'] % cub_gen.cub_frames != 0:
 				# Add the needed frames to conform a video dividible by the number
@@ -1167,13 +1177,13 @@ class ConsecutiveCuboidsGen(Sequence):
 	def __len__(self):
 		return np.ceil(self.__access_frames[-1] / self.batch_size).astype(int)
 
-	def __getitem__(self, idx):
-
-		if idx >= len(self):
-			raise IndexError('Index out of range')
+	def __get_cuboid(self, idx: int):
 
 		if idx < 0:
-			idx %= len(self)
+			idx %= self.__access_frames[-1]
+
+		if idx >= self.__access_frames[-1]:
+			raise IndexError('Index out of range')
 
 		if self.__frames is None or not (idx >= self.__loaded_frame_range[0] and
 										idx < self.__loaded_frame_range[1]):
@@ -1190,8 +1200,8 @@ class ConsecutiveCuboidsGen(Sequence):
 					self.__video_info[vid_idx-1]['frames'] %
 						self.__cub_gen.cub_frames) if vid_idx > 0 else 0
 			"""
-			start = self.__video_info[vid_idx-1]['cum frames']//8 if vid_idx > 0 else 0
-			stop = self.__video_info[vid_idx]['cum frames']//8
+			start = self.__video_info[vid_idx-1]['cum frames'] // self.__cub_gen.cub_frames if vid_idx > 0 else 0
+			stop = self.__video_info[vid_idx]['cum frames'] // self.__cub_gen.cub_frames
 
 			"""
 			stop = np.ceil((start + self.__video_info[vid_idx]['frames'] +
@@ -1224,7 +1234,32 @@ class ConsecutiveCuboidsGen(Sequence):
 
 		ret = np.expand_dims(ret, axis=0)
 
+		return ret
+
+	def __getitem__(self, idx):
+
+		if self.__batch_size == 1:
+			ret = self.__get_cuboid(idx)
+		else:
+			start = idx * self.__batch_size
+			stop = min(idx * self.__batch_size + self.__batch_size,
+						self.__access_frames[-1])
+
+			# Get first cuboid and allocate for the remained cuboids
+			f_cub = self.__get_cuboid(start)[0]
+
+			ret = np.zeros((stop - start, *f_cub.shape), dtype=f_cub.dtype)
+			ret[0] = f_cub
+
+			# Retrieve the remain cuboids
+			for i in range(stop - start):
+				ret[i] = self.__get_cuboid(i + start)[0]
+
 		return ret if not self.return_cub_as_label else (ret, ret)
+
+	@property
+	def cum_cuboids_per_video(self):
+		return tuple(self.__access_frames)
 
 class FramesFromCuboidsGen(Sequence):
 

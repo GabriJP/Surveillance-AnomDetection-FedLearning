@@ -239,3 +239,21 @@ def root_sum_squared_error(y_true, y_pred):
 					axis=K.arange(1, K.ndim(y_true)) )))
 	else:
 		return K.sqrt(K.sum(K.square(y_true - y_pred)))
+
+def split_measures_per_video(meas: np.ndarray,
+					cum_cuboids_per_video: list or tuple or np.ndarray):
+
+	"""Separates the measures performed for each test sample
+		on different arrays stored on a list with an array per test sample
+	"""
+
+	sep = []
+
+	for i in range(len(cum_cuboids_per_video)):
+
+		start = cum_cuboids_per_video[i-1] if i > 0 else 0 # Starting video cuboid
+		end = cum_cuboids_per_video[i]						# Ending video cuboid
+
+		sep.append(meas[start: end])
+
+	return sep

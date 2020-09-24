@@ -22,6 +22,7 @@ import sys
 import argparse
 import json
 import numpy as np
+import tensorflow
 from tensorflow.keras.models import clone_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import MeanSquaredError
@@ -31,6 +32,7 @@ from cv2 import resize, cvtColor, COLOR_BGR2GRAY
 from utils import extract_experiments_parameters, plot_results, root_sum_squared_error
 from fedLearn import SynFedAvgLearnModel
 from models import istl
+from learningRateImprover import LearningRateImprover
 
 # Constants
 CUBOIDS_LENGTH = 8
@@ -40,7 +42,6 @@ CUBOIDS_HEIGHT = 224
 # Image resize function
 resize_fn = lambda img: np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY),
 						(CUBOIDS_WIDTH, CUBOIDS_HEIGHT))/255, axis=2)
-
 
 ### Input Arguments
 parser = argparse.ArgumentParser(description='Trains an Incremental Spatio'\
@@ -95,14 +96,19 @@ config.experimental.set_memory_growth(physical_devices[0], True)
 
 # Perform training for each parameters combination
 results = []
-params = extract_experiments_parameters(exp_data, ('seed', 'batch_size'))
+params = extract_experiments_parameters(exp_data, ('seed', 'batch_size',
+												'lr_decay', 'max_stride'))
 
 for p in params:
 
 	try:
 		if 'seed' in p:
 			np.random.seed(p['seed'])
-			random.set_random_seed(p['seed'])
+
+			if tensorflow.__version__.startswith('1'):
+				random.set_random_seed(p['seed'])
+			else:
+				random.set_seed(p['seed'])
 
 		# Prepare the data train and make partitions
 		#data_train.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
@@ -115,9 +121,12 @@ for p in params:
 													prep_fn=resize_fn)
 		data_train.return_cub_as_label = True
 		data_train.batch_size = p['batch_size'] if 'batch_size' in p else 1
+		data_val, data_train = data_train.take_subpartition(
+									p['port_val'] if 'port_val' in p else 0.1,
+									p['seed'] if 'seed' in p else None)
 
 		# Augment the cuboids
-		data_train.augment_data(max_stride=3)
+		data_train.augment_data(max_stride=p['max_stride'] if 'max_stride' in p else 3)
 		data_train.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
 									seed=p['seed'] if 'seed' in p else time.time())
 
@@ -141,14 +150,18 @@ for p in params:
 		print('Training')
 		#print('- {} samples'.format(len(data_train)))
 
+		patience = p['patience'] if 'patience' in p else 0
 		epochs = p['epochs'] if 'epochs' in p else 1
-
 		hist = istl_model.fit(x=data_train, epochs=epochs,
-							#callbacks=[EarlyStopping(monitor='loss', patience=5,
-							#						min_delta=1e-10)],
-							callbacks=[ModelCheckpoint(filepath='backup.h5',
-														monitor='loss',
-														save_freq=20 * epochs,
+							validation_data=data_val,
+							callbacks=[LearningRateImprover(parameter='val_loss',
+										min_lr=1e-8, factor=0.9, patience=patience,
+										min_delta=1e-6, verbose=1,
+										restore_best_weights=True),
+									ModelCheckpoint(filepath='backup.h5',
+														monitor='val_loss',
+														save_freq=(20*epochs*
+														data_train.batch_size),
 														verbose=1)],
 							verbose=2,
 							shuffle=False)
@@ -157,6 +170,8 @@ for p in params:
 			#											save_freq='epoch',
 			#											verbose=1)
 
+		hist_val_rec = hist.history['val_root_sum_squared_error']
+		hist_val = hist.history['val_loss']
 		hist_rec = hist.history['root_sum_squared_error']
 		hist = hist.history['loss']
 
@@ -166,7 +181,7 @@ for p in params:
 																['Training']))
 
 		# Plot MSE
-		plot_results({'MSE': hist},
+		plot_results({'MSE - Training': hist, 'MSE - Validation': hist_val},
 			'Mean Squared Error',
 			model_base_filename +
 			'ISTL_MSE_train_loss_exp={}.pdf'.format(len(results)+1))
@@ -175,9 +190,13 @@ for p in params:
 			'ISTL_MSE_train_loss_exp={}.txt'.format(len(results)+1),
 					hist)
 
+		np.savetxt(model_base_filename +
+			'ISTL_MSE_val_loss_exp={}.txt'.format(len(results)+1),
+					hist_val)
 
 		# Plot RSSE
-		plot_results({'RSSE': hist_rec},
+		plot_results({'RSSE - Training': hist_rec,
+						'RSSE - Validation': hist_val_rec},
 			'Root of the Sum of Squared Errors',
 			model_base_filename +
 			'ISTL_RSSE_train_loss_exp={}.pdf'.format(len(results)+1))
@@ -185,6 +204,10 @@ for p in params:
 		np.savetxt(model_base_filename +
 			'ISTL_RSSE_train_loss_exp={}.txt'.format(len(results)+1),
 					hist_rec)
+
+		np.savetxt(model_base_filename +
+			'ISTL_RSSE_validation_loss_exp={}.txt'.format(len(results)+1),
+					hist_val_rec)
 
 		## Save model
 		if store_models:
@@ -202,7 +225,7 @@ for p in params:
 		data_train.return_cub_as_label = False
 		data_train.batch_size = 1
 		data_train.shuffle(False)
-		train_rec_error = evaluator.fit(data_train)
+		train_rec_error = evaluator.score_cuboids(data_train, False)
 
 		p['training_rec_errors'] = {
 									'mean': train_rec_error.mean(),
@@ -219,7 +242,8 @@ for p in params:
 		all_meas = evaluator.evaluate_cuboids_range_params(data_test,
 												test_labels,
 												np.arange(0.01, 1, 0.01),
-												np.arange(10, 90, 10))
+												np.arange(1, 10),
+												data_test.cum_cuboids_per_video)
 		p['results']= {'test all combinations': all_meas}
 
 		p['time']['total_elapsed time'] = (p['time']['test evaluation'] +
@@ -229,6 +253,7 @@ for p in params:
 
 	except Exception as e:
 		p['results'] = 'Failed to execute the experiment: ' + str(e)
+		raise
 
 	results.append(p)
 

@@ -32,6 +32,7 @@ from tensorflow.keras.layers import (Conv2D, ConvLSTM2D, Conv2DTranspose,
 from tensorflow.keras.layers import Conv3D, Conv3DTranspose
 from sklearn.metrics import roc_auc_score
 from utils import confusion_matrix, equal_error_rate
+#from persistence1d.filter_noise import filter_noise
 
 def build_ISTL(cub_length: int):
 
@@ -292,7 +293,7 @@ class ScorerISTL:
 		return score
 
 	def score_cuboids(self, cub_set: np.array or list or tuple,
-							scale_scores=True):
+							scale_scores=True, norm_zero_one=False):
 
 		"""Returns the reconstruction error of several input cuboids provided
 			through a generator or a an array or list of cuboids
@@ -320,22 +321,58 @@ class ScorerISTL:
 			raise ValueError('Input cuboid\'s collection must have '\
 								'__getitem__ and __len__ methods')
 
+		if not isinstance(scale_scores, (bool, tuple, list, np.ndarray)):
+			raise TypeError('scale_scores must be bool, tuple, list or '\
+							'numpy array')
+
+		if not isinstance(norm_zero_one, bool):
+			raise TypeError('"norm_zero_one" must be bool')
+
 		# Procedure
 		ret = np.zeros(len(cub_set), dtype='float64')
 
 		for i in range(len(cub_set)):
 			ret[i] = self.score_cuboid(cub_set[i])
 
-		if scale_scores:
+		if isinstance(scale_scores, bool) and scale_scores:
 
 			if self.__min_score_cub is None:
-				min_score = ret.min()
-				max_score = ret.max()
+				min_value = ret.min()
+				max_value = ret.max()
 			else:
 				min_value = self.__min_score_cub
 				max_value = self.__max_score_cub
 
-			ret = ((ret - min_value)/max_value, ret)
+			ret = ((ret - min_value)/(max_value - min_value), ret)
+			#ret = ((ret - min_value)/max_value, ret)
+
+		elif isinstance(scale_scores, (tuple, list, np.ndarray)):
+
+			ret_norm = np.zeros(ret.size, dtype=ret.dtype)
+
+			# Perform normalization per video
+			for i in range(len(scale_scores)):
+
+				start = scale_scores[i-1] if i > 0 else 0 # Starting video cuboid
+				end = scale_scores[i]						# Ending video cuboid
+
+				min_value = ret[start: end].min()
+				max_value = ret[start: end].max()
+				#min_value = ret[start: end].mean()
+				#max_value = ret[start: end].std()
+
+				if not norm_zero_one:
+					ret_norm[start: end] = ((ret[start: end] - min_value) /
+														(max_value))
+				else:
+					ret_norm[start: end] = ((ret[start: end] - min_value) /
+														(max_value - min_value))
+
+				# Filter the more persistence optima
+				#ret_norm[start: end] = filter_noise(ret_norm[start: end],
+				#						(ret_norm[start: end].max() -
+				#							ret_norm[start: end].min())*0.2)
+			ret = (ret_norm, ret)
 
 		return ret
 
@@ -351,6 +388,7 @@ class ScorerISTL:
 
 		scores = self.score_cuboids(cub_set, False)
 		self.__min_score_cub, self.__max_score_cub = scores.min(), scores.max()
+		#self.__min_score_cub, self.__max_score_cub = scores.mean(), scores.std()
 
 		return scores
 
@@ -450,7 +488,9 @@ class PredictorISTL(ScorerISTL):
 		return (self.score_cuboids(np.expand_dims(cuboid, axis=0), True)[0] >
 															self.__anom_thresh)
 
-	def predict_cuboids(self, cub_set, return_scores=False) -> np.ndarray:
+	def predict_cuboids(self, cub_set, return_scores=False,
+			cum_cuboids_per_video: list or tuple or np.ndarray=None,
+			norm_zero_one=False) -> np.ndarray:
 
 		"""For each cuboid retrievable from a cuboid's collection (i.e.
 			array-like object of cuboids or any genereator of cuboids), predicts
@@ -474,6 +514,9 @@ class PredictorISTL(ScorerISTL):
 					vector with the predictions and the vector with the scores,
 					if false, only the prediction vector is returned
 
+				cum_cuboids_per_video : array-like
+					array, list or tuple containing the cumulative cuboids
+					of each video.
 
 			Raise
 			-----
@@ -489,7 +532,9 @@ class PredictorISTL(ScorerISTL):
 		"""
 
 		# Get the reconstruction error of cuboid's collection
-		score, true_score = self.score_cuboids(cub_set, True)
+		scale = cum_cuboids_per_video if cum_cuboids_per_video is not None else True
+
+		score, true_score = self.score_cuboids(cub_set, scale, norm_zero_one)
 		preds = PredictorISTL._predict_from_scores(score, self.__anom_thresh,
 													self.__temp_thresh)
 
@@ -619,7 +664,9 @@ class EvaluatorISTL(PredictorISTL):
 		return len(self.__fp_cuboids)
 
 	## Methods ##
-	def evaluate_cuboids(self, cuboids: np.ndarray, labels: list or np.ndarray):
+	def evaluate_cuboids(self, cuboids: np.ndarray, labels: list or np.ndarray,
+					cum_cuboids_per_video: list or tuple or np.ndarray=None,
+					norm_zero_one=False):
 
 		"""Evaluates the prediction of the trained ISTL model given the anomaly
 			threshold and temporal threshold provided. Aditionaly, all the false
@@ -651,8 +698,10 @@ class EvaluatorISTL(PredictorISTL):
 			labels = np.array(labels)
 
 		# Predict all cuboids
-		pred, scores, true_scores = self.predict_cuboids(cuboids,
-									return_scores=True)
+		pred, scores, true_scores = self.predict_cuboids(cub_set=cuboids,
+									return_scores=True,
+									cum_cuboids_per_video=cum_cuboids_per_video,
+									norm_zero_one=norm_zero_one)
 		"""
 		scores = np.array(
 		[self.score_cuboid(cuboids[i]) for i in range(len(cuboids))]).squeeze()
@@ -690,19 +739,21 @@ class EvaluatorISTL(PredictorISTL):
 		# Compute performance metrics
 		cm = confusion_matrix(labels, pred)
 		
+		"""
 		# Normalize scores to compute AUC and EER
 		scores_min = scores.min()
 		scores_max = scores.max()
 		scores_norm = (scores - scores_min) / (scores_max - scores_min)
+		"""
 
 		try:
-			auc = roc_auc_score(labels, scores_norm)
+			auc = roc_auc_score(labels, scores)
 		except Exception as e:
 			auc = np.NaN
 			warnings.warn(str(e))
 
 		try:
-			eer = equal_error_rate(labels, scores_norm)[0]
+			eer = equal_error_rate(labels, scores)[0]
 		except Exception as e:
 			eer = np.NaN
 			warnings.warn(str(e))
@@ -716,8 +767,12 @@ class EvaluatorISTL(PredictorISTL):
 				'EER': eer
 			}
 
-		ret['f1 score'] = ((2 * ret['precision'] * ret['recall'])/
-							(ret['precision'] + ret['recall']))
+		try:
+			ret['f1 score'] = ((2 * ret['precision'] * ret['recall'])/
+								(ret['precision'] + ret['recall']))
+		except Exception as e:
+			ret['f1 score'] = float(np.NaN)
+			warnings.warn(str(e))
 
 		ret['confusion matrix'] = {
 									'TP': int(cm[1, 1]),
@@ -733,6 +788,45 @@ class EvaluatorISTL(PredictorISTL):
 										'max': scores.max()
 									}
 
+		ret['class_reconstruction_error_norm'] = {}
+
+		try:
+			ret['class_reconstruction_error_norm']['Normal'] = {
+												'mean': scores[labels==0].mean(),
+												'std': scores[labels==0].std(),
+												'min': scores[labels==0].min(),
+												'max': scores[labels==0].max()
+											}
+		except Exception as e:
+			ret['class_reconstruction_error_norm']['Normal'] = {
+												'mean': float(np.NaN),
+												'std': float(np.NaN),
+												'min': float(np.NaN),
+												'max': float(np.NaN)
+											}
+
+			warnings.warn('Couldn\'t compute normalized reconstruction error '\
+							'summary for Normal Class: '+str(e))
+
+
+		try:
+			ret['class_reconstruction_error_norm']['Abnormal'] = {
+												'mean': scores[labels==1].mean(),
+												'std': scores[labels==1].std(),
+												'min': scores[labels==1].min(),
+												'max': scores[labels==1].max()
+										}
+		except Exception as e:
+			ret['class_reconstruction_error_norm']['Abnormal'] = {
+												'mean': float(np.NaN),
+												'std': float(np.NaN),
+												'min': float(np.NaN),
+												'max': float(np.NaN)
+											}
+
+			warnings.warn('Couldn\'t compute normalized reconstruction error '\
+							'summary for Abnormal Class: '+str(e))
+
 		if true_scores is not None:
 			ret['reconstruction_error'] = {
 											'mean': true_scores.mean(),
@@ -741,13 +835,55 @@ class EvaluatorISTL(PredictorISTL):
 											'max': true_scores.max()
 										}
 
+			ret['class_reconstruction_error'] = {}
+
+
+
+			try:
+				ret['class_reconstruction_error']['Normal'] = {
+										'mean': true_scores[labels==0].mean(),
+										'std': true_scores[labels==0].std(),
+										'min': true_scores[labels==0].min(),
+										'max': true_scores[labels==0].max()
+										}
+			except Exception as e:
+				ret['class_reconstruction_error']['Normal'] = {
+													'mean': float(np.NaN),
+													'std': float(np.NaN),
+													'min': float(np.NaN),
+													'max': float(np.NaN)
+												}
+				warnings.warn('Couldn\'t compute reconstruction error '\
+								'summary for Normal Class: '+str(e))
+
+
+			try:
+				ret['class_reconstruction_error']['Abnormal'] = {
+										'mean': true_scores[labels==1].mean(),
+										'std': true_scores[labels==1].std(),
+										'min': true_scores[labels==1].min(),
+										'max': true_scores[labels==1].max()
+									}
+			except Exception as e:
+				ret['class_reconstruction_error']['Abnormal'] = {
+													'mean': float(np.NaN),
+													'std': float(np.NaN),
+													'min': float(np.NaN),
+													'max': float(np.NaN)
+												}
+
+				warnings.warn('Couldn\'t compute reconstruction error '\
+								'summary for Abnormal Class: '+str(e))
+
 
 		return ret
 
 	def evaluate_cuboids_range_params(self, cuboids: np.ndarray,
-										labels: list or np.ndarray,
-										anom_thresh_range: list or tuple or np.ndarray,
-										temp_thresh_range: list or tuple or np.ndarray):
+					labels: list or np.ndarray,
+					anom_thresh_range: list or tuple or np.ndarray,
+					temp_thresh_range: list or tuple or np.ndarray,
+					cum_cuboids_per_video: list or tuple or np.ndarray=None,
+					norm_zero_one=False):
 
 		"""Evaluates the prediction of the trained ISTL model given each combined
 			pair of anomaly threshold and temporal threshold values from the
@@ -797,7 +933,9 @@ class EvaluatorISTL(PredictorISTL):
 			labels = np.array(labels)
 
 		# Predict all cuboids
-		scores, true_scores = self.score_cuboids(cuboids, True)
+		scale = cum_cuboids_per_video if cum_cuboids_per_video is not None else True
+
+		scores, true_scores = self.score_cuboids(cuboids, scale, norm_zero_one)
 		meas = {
 				'reconstruction_error_norm': {
 						'mean': scores.mean(),
