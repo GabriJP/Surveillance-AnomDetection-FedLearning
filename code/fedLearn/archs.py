@@ -7,12 +7,14 @@
 ###############################################################################
 
 # Imported modules
+from sys import path
 from os import remove
 from os.path import isfile
 from copy import copy, deepcopy
 import numpy as np
 from tensorflow.keras import Model
 from tensorflow.keras.models import clone_model, load_model
+from tensorflow.keras.utils import get_custom_objects
 import tensorflow.keras.backend as K
 from .agr_methods import fedAvg, asyncUpd, globFeatRep
 from .asynOnLocalUpdate import AsynOnLocalUpdate
@@ -116,6 +118,9 @@ class FedLearnModel:
 
 		if not isinstance(params['save_only_weights'], bool):
 			raise TypeError('save_only_weights for backup schedule must be bool')
+
+		if params['custom_objects'] and not isinstance(params['custom_objects'], dict):
+			raise TypeError('Customs objects in backup schedule must be a dict')
 
 	### Getters ###
 
@@ -235,6 +240,7 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 		self.__backup['filename'] = (kwargs['backup_filename'] if 'backup_filename' in kwargs else None)
 		self.__backup['epochs'] = (kwargs['backup_epochs'] if 'backup_epochs' in kwargs else 5)
 		self.__backup['save_only_weights'] = (kwargs['backup_save_only_weights'] if 'backup_save_only_weights' in kwargs else True)
+		self.__backup['custom_objects'] = kwargs['backup_custom_objects'] if 'backup_custom_objects' in kwargs else None
 
 		SynFedAvgLearnModel._check_backup_params(self.__backup)
 
@@ -246,7 +252,8 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 			if self.__backup['save_only_weights']:
 				self._global_model.load_weights(self.__backup['filename'])
 			else:
-				self._global_model = load_model(self.__backup['filename'])
+				self._global_model = load_model(self.__backup['filename'],
+					custom_objects=self.__backup['custom_objects'])
 
 			if kwargs['verbose']:
 				print('Loading a previous backup model found at "{}"'.format(

@@ -774,6 +774,8 @@ class EvaluatorISTL(PredictorISTL):
 			ret['f1 score'] = float(np.NaN)
 			warnings.warn(str(e))
 
+		ret['TPRxTNR'] = ret['recall'] * ret['specificity']
+
 		ret['confusion matrix'] = {
 									'TP': int(cm[1, 1]),
 									'TN': int(cm[0, 0]),

@@ -152,17 +152,17 @@ for p in params:
 
 		patience = p['patience'] if 'patience' in p else 0
 		epochs = p['epochs'] if 'epochs' in p else 1
-		hist = istl_model.fit(x=data_train, epochs=epochs,
-							validation_data=data_val,
-							callbacks=[LearningRateImprover(parameter='val_loss',
+		callbacks = [LearningRateImprover(parameter='val_loss',
 										min_lr=1e-8, factor=0.9, patience=patience,
 										min_delta=1e-6, verbose=1,
 										restore_best_weights=True),
 									ModelCheckpoint(filepath='backup.h5',
 														monitor='val_loss',
-														save_freq=(20*epochs*
-														data_train.batch_size),
-														verbose=1)],
+														save_freq='epoch',
+														verbose=1)]
+		hist = istl_model.fit(x=data_train, epochs=epochs,
+							validation_data=data_val,
+							callbacks=callbacks,
 							verbose=2,
 							shuffle=False)
 		# 										ModelCheckpoint(filepath='backup.h5',
@@ -208,6 +208,16 @@ for p in params:
 		np.savetxt(model_base_filename +
 			'ISTL_RSSE_validation_loss_exp={}.txt'.format(len(results)+1),
 					hist_val_rec)
+
+		# Plot lr history
+		plot_results({'Lr history': callbacks[0].lr_history},
+			'Learning rate history',
+			model_base_filename +
+			'ISTL_lr_history_exp={}.pdf'.format(len(results)+1))
+
+		np.savetxt(model_base_filename +
+			'ISTL_lr_history_exp={}.txt'.format(len(results)+1),
+					callbacks[0].lr_history)
 
 		## Save model
 		if store_models:

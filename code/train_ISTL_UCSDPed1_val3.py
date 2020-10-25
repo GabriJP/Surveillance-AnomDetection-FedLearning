@@ -239,8 +239,39 @@ for p in params:
 														'temp_thresh',
 														'force_relearning',
 														'norm_mode'))
-
 	for q in thresh_params:
+
+		### Evaluation of test set after 1st iteration
+		# Prepare to save results
+		q['results'] = {}
+		q['results']['test set'] = {}
+
+		evaluator = istl.EvaluatorISTL(model=istl_fed_model.global_model,
+										cub_frames=CUBOIDS_LENGTH,
+										anom_thresh=q['anom_thresh'],
+										temp_thresh=q['temp_thresh'])
+
+		# Fit the evaluator to the train samples if this normalization
+		#	mode is set
+		if q['norm_mode'] == 'train_samples':
+
+			for split in (train_split[0], train_split[1]):
+				split.batch_size = 1
+				split.return_cub_as_label = False
+
+			train_eval = istl.generators.CuboidsGenerator.merge(train_split[0],
+																train_split[1])
+
+			evaluator.fit(train_eval)
+
+		cum_cuboids_per_video = data_test.cum_cuboids_per_video if q['norm_mode'] == 'test_samples' else None
+		meas = evaluator.evaluate_cuboids(data_test, test_labels,
+											cum_cuboids_per_video)
+
+		q['results']['test set']['1st iteration'] = {
+													'fp cuboids': len(evaluator),
+													'measures': meas
+												}
 
 		print('Executing 2nd and 3rd iteration with parameters: {}'. format(q))
 
@@ -258,12 +289,6 @@ for p in params:
 										anom_thresh=q['anom_thresh'],
 										temp_thresh=q['temp_thresh'])
 
-		for split in (train_split[0], train_split[1]):
-			split.batch_size = 1
-			split.return_cub_as_label = False
-
-		train_eval = istl.generators.CuboidsGenerator.merge(train_split[0],
-																train_split[1])
 		if q['norm_mode'] == 'train_samples':
 			train_rec_error = evaluator.fit(train_eval)
 		elif q['norm_mode'] == 'test_samples':
@@ -279,8 +304,10 @@ for p in params:
 											'max': train_rec_error.max()
 										}}
 
-		q['results'] = {}
-		q['results']['2nd iteration'] = {}
+
+		#q['results']['2nd iteration'] = {}
+		q['active_training_evaluation'] = {}
+		q['active_training_evaluation']['2nd iteration'] = {}
 
 		data = {0: train_split[2], 1: train_split[3]}
 		val_data = {}
@@ -316,7 +343,8 @@ for p in params:
 			print('Evaluation of second iteration client set {} founding {} '\
 				' false positive cuboids\n{}'.format(c, len(evaluator), meas))
 
-			q['results']['2nd iteration'][c] = {'fp cuboids': len(evaluator),
+			q['active_training_evaluation']['2nd iteration'][c] = {
+													'fp cuboids': len(evaluator),
 													'measures': meas}
 
 			if not q['force_relearning']:
@@ -435,6 +463,17 @@ for p in params:
 											'max': train_rec_error.max()
 										}
 
+			### Evaluation of test set
+			evaluator.clear()
+			cum_cuboids_per_video = data_test.cum_cuboids_per_video if q['norm_mode'] == 'test_samples' else None
+			meas = evaluator.evaluate_cuboids(data_test, test_labels,
+												cum_cuboids_per_video)
+
+			q['results']['test set']['2nd iteration'] = {
+												'fp cuboids': len(evaluator),
+												'measures': meas
+											}
+
 		else:
 			hist2 = {c: [] for c in range(2)}
 			hist2_val = hist2
@@ -471,7 +510,7 @@ for p in params:
 
 		# Evaluate performance and retrieve false positive cuboids
 		# to train with them
-		q['results']['3rd iteration'] = {}
+		q['active_training_evaluation']['3rd iteration'] = {}
 
 		for c in data:
 			evaluator.clear()
@@ -483,8 +522,10 @@ for p in params:
 			print('Evaluation of third iteration client set {} founding {} false positive'\
 					' cuboids\n{}'.format(c, len(evaluator), meas))
 
-			q['results']['3rd iteration'][c] = {'fp cuboids': len(evaluator),
-													'measures': meas}
+			q['active_training_evaluation']['3rd iteration'][c] = {
+													'fp cuboids': len(evaluator),
+													'measures': meas
+												}
 			if not q['force_relearning']:
 				data[c] = evaluator.fp_cuboids if len(evaluator) else None
 			else:
@@ -653,8 +694,10 @@ for p in params:
 		q['time']['mean evaluation time per test sample'] = (
 									q['time']['test evaluation'] / len(data_test))
 
-		q['results']['test set'] = {'fp cuboids': len(evaluator),
-										'measures': meas}
+		q['results']['test set']['3rd iteration'] = {
+													'fp cuboids': len(evaluator),
+													'measures': meas
+												}
 
 		print('Evaluation of test set founding {} false positive'\
 					' cuboids\n{} - time taken: {}s - mean evaluation time'\
