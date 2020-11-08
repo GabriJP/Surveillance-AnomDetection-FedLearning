@@ -38,6 +38,7 @@ from utils import root_sum_squared_error
 CUBOIDS_LENGTH = 8
 CUBOIDS_WIDTH = 224
 CUBOIDS_HEIGHT = 224
+NUM_CLIENTS = 2
 
 # Image resize function
 resize_fn = lambda img: np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY),
@@ -126,16 +127,30 @@ for p in params:
 		np.random.seed(p['seed'])
 		random.set_random_seed(p['seed'])
 
-	# Prepare the data train and make partitions
-	#data_train.shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
-	#						seed=p['seed'] if 'seed' in p else time.time())
+	# Prepare the data train
+
+	if 'batch_size' in p:
+		if isinstance(p['batch_size'], int):
+			# Set the same batch_size for all the clients
+			p['batch_size'] = [p['batch_size']] * NUM_CLIENTS
+
+		elif isinstance(p['batch_size'], (list, tuple)):
+			if len(p['batch_size']) != NUM_CLIENTS:
+				print('The list of batch sizes for each client must provide a '\
+						'batch size for the {} clients'.format(NUM_CLIENTS))
+				continue
+
+		else:
+			print('Batch size provided is not valid, a single int or a list '\
+					'of int must be provided for each experiment')
+			continue
 
 	# The generators must return the cuboids batch as label also when indexing
 	data_train_up1.return_cub_as_label = True
-	data_train_up1.batch_size = p['batch_size'] if 'batch_size' in p else 1
+	data_train_up1.batch_size = p['batch_size'][0] if 'batch_size' in p else 1
 
 	data_train_up2.return_cub_as_label = True
-	data_train_up2.batch_size = p['batch_size'] if 'batch_size' in p else 1
+	data_train_up2.batch_size = p['batch_size'][1] if 'batch_size' in p else 1
 
 	# Provide each dataset to each node
 	data = {0: data_train_up1, 1: data_train_up2}
@@ -161,7 +176,8 @@ for p in params:
 				epsilon=1e-6)
 
 
-	istl_fed_model = SynFedAvgLearnModel(build_fn=istl.build_ISTL, n_clients=2,
+	istl_fed_model = SynFedAvgLearnModel(build_fn=istl.build_ISTL,
+										n_clients=NUM_CLIENTS,
 										cub_length=CUBOIDS_LENGTH)
 	istl_fed_model.compile(optimizer=adam, loss=MeanSquaredError(),
 							metrics=[root_sum_squared_error])
@@ -179,7 +195,7 @@ for p in params:
 								patience=patience,
 								min_delta=1e-6, verbose=1,
 								restore_best_weights=True,
-								acumulate_epochs=True)] for c in range(2)}
+								acumulate_epochs=True)] for c in range(NUM_CLIENTS)}
 
 	hist = istl_fed_model.fit(x=data,
 						validation_data=val_data,
@@ -202,7 +218,7 @@ for p in params:
 															['Training']))
 
 	# Plot MSE
-	for c in range(2):
+	for c in range(NUM_CLIENTS):
 		# Plot MSE
 		plot_results({'MSE - training': hist[c]['loss'],
 						'MSE - validation': hist[c]['val_loss']},
