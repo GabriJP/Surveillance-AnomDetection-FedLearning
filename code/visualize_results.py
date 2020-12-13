@@ -14,6 +14,16 @@ import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 
+## Defined mapping
+MAP_FIELD_NAMES = {'accuracy': 'Accuracy',
+					'precision': 'Precision',
+					'recall': 'Recall',
+					'specificity': 'Specificity',
+					'AUC': 'AUC',
+					'EER': 'EER',
+					'f1 score': 'F1 Score',
+					'TPRxTNR': 'TPRxTNR'}
+
 ## Defined function
 def get_results_data(data: dict or list):
 
@@ -80,12 +90,19 @@ if results:
 	results = pd.DataFrame.from_records(results, exclude=('confusion matrix',
 													'reconstruction_error_norm'))
 
-	for y in ('accuracy', 'precision',	'recall', 'specificity', 'AUC', 'EER',
-																	'f1 score'):
+	for y in MAP_FIELD_NAMES.keys():
+
+		if y not in results:
+			continue
+
+		# Plot the metric
 		fig, ax = plt.subplots(1)
 
 		for temp_thresh, group in results.groupby('temp_thresh'):
 			group.plot(x='anom_thresh', y=y, ax=ax, label=temp_thresh)
 
-		plt.legend(title='temp threshold')
-		plt.savefig(base_fn+'_{}.svg'.format(y))
+		plt.legend(title=u'\u03BB')
+		plt.ylabel(MAP_FIELD_NAMES[y])
+		plt.xlabel(u'\u03BC')
+		plt.title(MAP_FIELD_NAMES[y])
+		plt.savefig(base_fn+'_{}.pdf'.format(y))
