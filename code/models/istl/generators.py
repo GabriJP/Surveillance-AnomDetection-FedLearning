@@ -493,6 +493,51 @@ class CuboidsGenerator(Sequence):
 
 		return cubgens
 
+	def take_cons_subpartition(self, port: float):
+
+		"""Split the current generator into two generators, containing the first
+			one, a subpartition containing the given porcentage of last video
+			cuboids and the second one the remained ones.
+
+			Parameters:
+			-----------
+			port : float
+				Portion of the original cuboids to select for the subpartition
+		"""
+
+		# Check input
+		if not isinstance(port, float):
+			raise TypeError('The portion for the subpartition must be float')
+
+		if port <= 0 or port >= 1:
+			raise ValueError('The portion for the subpartition must be in (0, 1)')
+
+		# Procedure
+		cubgens = tuple(deepcopy(self) for i in range(2))
+		cubgens[0]._cuboids_info = []
+
+		# Select a random subpartition
+		for i in range(self._video_info):
+
+			# Determine the number of cuboids to extract from current video
+			# and the current index to get
+			part_size = np.round(port * self._video_info[i]['num_cuboids']).astype(int)
+			idx = self._video_info[i]['first_cuboid_index']
+
+			# Add the selected cuboids if choosen to the subpartition and remove
+			# from the second one
+			cubgens[0]._cuboids_info.extend(self._cuboids_info[idx: idx + part_size])
+			del cubgens[1]._cuboids_info[idx: idx + part_size]
+
+		# Update the partition's video information
+		for cub in cubgens:
+			cub._cuboids = None
+			cub.__loaded_cub_range = [None, None]
+			cub._access_cuboids = cub._cuboids_info
+			cub._update_video_info()
+
+		return cubgens
+
 	def merge(*args):
 
 		"""Merge several Cuboids Generators into one single Cuboids Generator
@@ -672,13 +717,15 @@ class CuboidsGeneratorFromImgs(CuboidsGenerator):
 		video_info_list = []
 
 		video_info = None
-		for cub_info in self._cuboids_info:
+		for i, cub_info in enumerate(self._cuboids_info):
 
 			if not video_info or video_info['video fname'] != cub_info[0]:
-				video_info = {'video fname': cub_info[0], 'frames': 0}
+				video_info = {'video fname': cub_info[0], 'frames': 0,
+								'first_cuboid_index': i, 'num_cuboids': 0}
 				video_info_list.append(video_info)
 			
 			video_info['frames'] += len(set(cub_info[1]))
+			video_info['num_cuboids'] += 1
 
 		self._video_info = video_info_list
 
@@ -874,12 +921,14 @@ class CuboidsGeneratorFromVid(CuboidsGenerator):
 		video_info_list = []
 
 		video_info = None
-		for cub_info in self._cuboids_info:
+		for i, cub_info in enumerate(self._cuboids_info):
 
 			if not video_info or video_info['video fname'] != cub_info[0]:
-				video_info = {'video fname': cub_info[0], 'frames': 0}
+				video_info = {'video fname': cub_info[0], 'frames': 0,
+								'first_cuboid_index': i, 'num_cuboids': 0}
 				video_info_list.append(video_info)
 			
+			video_info['num_cuboids'] += 1			
 			video_info['frames'] += np.floor((cub_info[2] - cub_info[1] + 1) / cub_info[3]).astype(int) # len(set(cub_info[1]))
 
 		self._video_info = video_info_list
