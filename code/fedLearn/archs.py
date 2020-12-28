@@ -8,6 +8,7 @@
 
 # Imported modules
 from sys import path
+from collections import deque
 from os import remove
 from os.path import isfile
 from copy import copy, deepcopy
@@ -210,11 +211,16 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 					'callback list for each client')
 
 		n_epochs = kwargs['epochs'] # Get number of epochs specified
-		train = True				# Flag for setting or stopping the training
 
 		# Keep number of samples used by each client node
-		samp_per_client = [len((kwargs['x'][c] if kwargs['x'][c] is not None else [])
-							if isinstance(kwargs['x'], dict) else kwargs['x']) for c in self._client_model]
+		samp_per_client = {c: len((kwargs['x'][c] if kwargs['x'][c] is not None else [])
+							if isinstance(kwargs['x'], dict) else kwargs['x']) for c in self._client_model}
+
+		# Flag for setting or stopping the training for each client
+		# It will store True for clients with train samples and False for clients
+		#	without train samples
+		train = {c: samp_per_client[c] > 0 for c in samp_per_client}
+		#train = dict(zip(self._client_model.keys(), [samp_per_client[i] > 0 for i in range(len(samp_per_client))]))
 
 		# Get the early stop schedule
 		self.__early_stop = dict()
@@ -261,7 +267,7 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 
 		for epoch in range(n_epochs):
 
-			if not train:
+			if not any(train[c] for c in train):
 				break # Stop training
 
 			if kwargs['verbose']:
@@ -287,7 +293,7 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 			# Perform local training
 			for c in self._client_model:
 
-				if kwargs['x'][c] is None:
+				if kwargs['x'] is None or kwargs['x'][c] is None or not train[c]:
 					continue
 
 				# Verbose mode
@@ -323,10 +329,11 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 					history[c] = dict()
 
 					for h in hist.history:
-						history[c][h] = np.zeros(n_epochs)
+						history[c][h] = deque() #np.zeros(n_epochs)
 
 				for h in hist.history:
-					history[c][h][epoch] = hist.history[h][0]
+					history[c][h].append(hist.history[h][0])
+					#history[c][h][epoch] = hist.history[h][0]
 
 				# Execute early stopping schedule
 				if self.__early_stop['monitor']:
@@ -339,7 +346,8 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 
 						if (self.__early_stop['times'][c] >=
 												self.__early_stop['patience']):
-							train = False # Stop training
+							# Stop training on all the clients
+							for i in self._client_model: train[i] = False
 
 							if kwargs['verbose']:
 								print('Client {} - After {} epochs without '\
@@ -365,16 +373,22 @@ class SynFedAvgLearnModel(SynFedLearnModel):
 				# Check wheter any compatible callback has stopped the train
 				if 'callbacks' in kwargs:
 					if any(hasattr(callback, 'stop_training') and callback.stop_training for callback in kwargs['callbacks'][c]):
-						train = False
+						# Stop training on all the clients
+						for i in self._client_model: train[i] = False
 
 			# Perform agregation
 			fedAvg(models=list(self._client_model.values()),
-					samp_per_models=samp_per_client,
+					samp_per_models=list(samp_per_client.values()),
 					output_model=self._global_model)
 
 		# Remove backup model as it's no longer needed
 		if self.__backup['filename'] and isfile(self.__backup['filename']):
 			remove(self.__backup['filename'])
+
+		# Put the history in the correct format
+		for c in history:
+			for h in history[c]:
+				history[c][h] = np.array(history[c][h])
 
 		return history
 

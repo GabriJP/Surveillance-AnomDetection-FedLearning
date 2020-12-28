@@ -24,7 +24,7 @@ def fedAvg(models: list, samp_per_models: list, output_model: Model):
 						' the same length as "models"')
 
 	if any(x < 0 for x in samp_per_models):
-		raise ValueError('"samp_per_models" values must be greater than 0')
+		raise ValueError('"samp_per_models" values can\'t be less than 0')
 
 	if not isinstance(output_model, Model):
 		raise ValueError('"output_model" must be a Model')
@@ -35,22 +35,25 @@ def fedAvg(models: list, samp_per_models: list, output_model: Model):
 	# Agregates weights of first client
 	for l in range(len(output_model.layers)):
 		output_model.get_layer(index=l).set_weights(
-			[w*(samp_per_models[0]/total_samples) for w in models[0].get_layer(
-														index=l).get_weights()]
+				[w*(samp_per_models[0]/total_samples) for w in models[0].get_layer(
+															index=l).get_weights()]
 		)
 
 	# Agregates weights of the rest clients
 	for c in range(1, len(models)):
 
-		for l in range(len(output_model.layers)):
-			w_length = len(models[c].get_layer(index=l).get_weights())
+		if samp_per_models[c] > 0:
+
 			rate = (samp_per_models[c]/total_samples)
 
-			output_model.get_layer(index=l).set_weights(
-				[output_model.get_layer(index=l).get_weights()[i] +
-					models[c].get_layer(index=l).get_weights()[i] *
-					rate for i in range(w_length)]
-			)
+			for l in range(len(output_model.layers)):
+				w_length = len(models[c].get_layer(index=l).get_weights())
+
+				output_model.get_layer(index=l).set_weights(
+					[output_model.get_layer(index=l).get_weights()[i] +
+						models[c].get_layer(index=l).get_weights()[i] *
+						rate for i in range(w_length)]
+				)
 
 
 def asyncUpd(global_model: Model, client_models: list, pre_client_models: list,

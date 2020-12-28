@@ -86,7 +86,8 @@ test_label = exp_data['test_label']
 
 data_test = istl.generators.CuboidsGeneratorFromImgs(source=test_video_dir,
 									cub_frames=CUBOIDS_LENGTH,
-									prep_fn=resize_fn)
+									prep_fn=resize_fn,
+									max_cuboids=10000)
 data_test = istl.generators.ConsecutiveCuboidsGen(data_test)
 test_labels = np.loadtxt(test_label, dtype='int8')
 
@@ -118,7 +119,8 @@ for p in params:
 		data_train = istl.generators.CuboidsGeneratorFromImgs(
 													source=train_video_dir,
 													cub_frames=CUBOIDS_LENGTH,
-													prep_fn=resize_fn)
+													prep_fn=resize_fn,
+													max_cuboids=10000)
 		data_train.return_cub_as_label = True
 		data_train.batch_size = p['batch_size'] if 'batch_size' in p else 1
 		data_val, data_train = data_train.take_subpartition(

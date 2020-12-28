@@ -657,8 +657,14 @@ class EvaluatorISTL(PredictorISTL):
 	## Getters ##
 	@property
 	def fp_cuboids(self):
-		return (np.array(self.__fp_cuboids) if len(self.__fp_cuboids) > 1 else
-									np.expand_dims(self.__fp_cuboids, axis=0))
+		if len(self.__fp_cuboids) > 1:
+			return np.array(self.__fp_cuboids)
+		elif len(self.__fp_cuboids) == 1:
+			return np.expand_dims(self.__fp_cuboids, axis=0)
+		else:
+			return None
+		#return (np.array(self.__fp_cuboids) if len(self.__fp_cuboids) > 1 else
+		#							np.expand_dims(self.__fp_cuboids, axis=0))
 
 	def __len__(self):
 		return len(self.__fp_cuboids)

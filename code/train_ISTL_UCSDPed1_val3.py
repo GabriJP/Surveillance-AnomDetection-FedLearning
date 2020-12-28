@@ -182,16 +182,21 @@ for p in params:
 						verbose=2,
 						shuffle=False)
 
-	hist1_rec = {c: hist1[c]['root_sum_squared_error'] for c in hist1}
-	hist1_val_rec = {c: hist1[c]['val_root_sum_squared_error'] for c in hist1}
-	hist1_val = {c: hist1[c]['val_loss'] for c in hist1}
-	hist1 = {c: hist1[c]['loss'] for c in hist1}
+	hist1_rec = {c: hist1[c]['root_sum_squared_error'] if c in hist1 else [] for c in range(2)}
+	hist1_val_rec = {c: hist1[c]['val_root_sum_squared_error'] if c in hist1 else [] for c in range(2)}
+	hist1_val = {c: hist1[c]['val_loss'] if c in hist1 else [] for c in range(2)}
+	hist1 = {c: hist1[c]['loss'] if c in hist1 else [] for c in range(2)}
 	lr_hist1 = {c: callbacks[c][0].lr_history for c in callbacks}
 
 	t_1it_end = time.time()
 	p['time'] = {'1st iteration': (t_1it_end - t_1it_start)}
 	print('End of 1st iteration - elapsed time {} s'.format(p['time']
 															['1st iteration']))
+
+	## Save model of first iteration
+	if store_models:
+		istl_fed_model.global_model.save(model_base_filename +
+							'-experiment-'+str(len(results) + 1) + '_1st_iteration_model.h5')
 
 	# Plot MSE of client training
 	for c in range(2):
@@ -348,7 +353,7 @@ for p in params:
 													'measures': meas}
 
 			if not q['force_relearning']:
-				data[c] = evaluator.fp_cuboids if len(evaluator) else None
+				data[c] = evaluator.fp_cuboids #if len(evaluator) else None
 			else:
 				print('Training with all samples despite no false positive has'\
 																' been found')
@@ -364,12 +369,12 @@ for p in params:
 			json.dump(q, f, indent=4)
 
 		# Train with false positive cuboids
-		if all(data[c] is not None for c in data):
+		if any(data[c] is not None for c in data):
 			t_2it_start = time.time()
 			print('Training on 2nd iteration - start time: {} s'.format(t_2it_start - t_start))
 			print('- Client 0: {} samples, Client 1: {} samples'.format(
-												len(data[0]),
-												len(data[1])))
+												len(data[0]) if data[0] is not None else 0,
+												len(data[1]) if data[1] is not None else 0))
 
 			patience = p['patience'] if 'patience' in p else 0
 			epochs = p['epochs'] if 'epochs' in p else 1
@@ -392,16 +397,21 @@ for p in params:
 					shuffle=False)
 
 
-			hist2_rec = {c: hist2[c]['root_sum_squared_error'] for c in hist2}
-			hist2_val_rec = {c: hist2[c]['val_root_sum_squared_error'] for c in hist2}
-			hist2_val = {c: hist2[c]['val_loss'] for c in hist2}
-			hist2 = {c: hist2[c]['loss'] for c in hist2}
+			hist2_rec = {c: hist2[c]['root_sum_squared_error'] if c in hist2 else [] for c in range(2)}
+			hist2_val_rec = {c: hist2[c]['val_root_sum_squared_error'] if c in hist2 else [] for c in range(2)}
+			hist2_val = {c: hist2[c]['val_loss'] if c in hist2 else [] for c in range(2)}
+			hist2 = {c: hist2[c]['loss'] if c in hist2 else [] for c in range(2)}
 			lr_hist2 = {c: callbacks[c][0].lr_history for c in callbacks}
 
 			t_2it_end = time.time()
 			q['time']['2nd iteration'] = (t_2it_end - t_2it_start)
 			print('End of training - elapsed time {} s'.format(q['time']
 															['2nd iteration']))
+
+			## Save model
+			if store_models:
+				istl_fed_model_copy.global_model.save(model_base_filename +
+									'-experiment-'+str(len(results)) + '_2nd_iteration_model.h5')
 
 			# Plot MSE of client training
 			for c in range(2):
@@ -527,7 +537,7 @@ for p in params:
 													'measures': meas
 												}
 			if not q['force_relearning']:
-				data[c] = evaluator.fp_cuboids if len(evaluator) else None
+				data[c] = evaluator.fp_cuboids #if len(evaluator) else None
 			else:
 				print('Training with all samples despite no false positive has'\
 																' been found')
@@ -541,12 +551,12 @@ for p in params:
 			json.dump(q, f, indent=4)
 
 		# Training with false positive cuboids
-		if all(data[c] is not None for c in data):
+		if any(data[c] is not None for c in data):
 			t_3it_start = time.time()
 			print('Training on 3rd iteration - time: {} s'.format(t_3it_start - t_start))
 			print('- Client 0: {} samples, Client 1: {} samples'.format(
-												len(data[0]),
-												len(data[1])))
+												len(data[0]) if data[0] is not None else 0,
+												len(data[1]) if data[1] is not None else 0))
 
 			patience = p['patience'] if 'patience' in p else 0
 			epochs = p['epochs'] if 'epochs' in p else 1
@@ -569,10 +579,10 @@ for p in params:
 					shuffle=False)
 
 
-			hist3_rec = {c: hist3[c]['root_sum_squared_error'] for c in hist3}
-			hist3_val_rec = {c: hist3[c]['val_root_sum_squared_error'] for c in hist3}
-			hist3_val = {c: hist3[c]['val_loss'] for c in hist3}
-			hist3 = {c: hist3[c]['loss'] for c in hist3}
+			hist3_rec = {c: hist3[c]['root_sum_squared_error'] if c in hist3 else [] for c in range(2)}
+			hist3_val_rec = {c: hist3[c]['val_root_sum_squared_error'] if c in hist3 else [] for c in range(2)}
+			hist3_val = {c: hist3[c]['val_loss'] if c in hist3 else [] for c in range(2)}
+			hist3 = {c: hist3[c]['loss'] if c in hist3 else [] for c in range(2)}
 			lr_hist3 = {c: callbacks[c][0].lr_history for c in callbacks}
 
 			t_3it_end = time.time()
@@ -675,7 +685,7 @@ for p in params:
 				model_base_filename +
 				'ISTL_all_training_client{}_RSSE_train_loss_exp={}.pdf'.format(c, len(results)))
 
-		## Save model
+		## Save definitive model
 		if store_models:
 			istl_fed_model_copy.global_model.save(model_base_filename +
 								'-experiment-'+str(len(results)) + '_model.h5')
