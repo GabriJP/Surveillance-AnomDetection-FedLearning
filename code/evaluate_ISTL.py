@@ -62,6 +62,8 @@ parser.add_argument('-o', '--output', help='Output file in which the results'\
 parser.add_argument('-n', '--norm_zero_one', help='Set the normalization between'\
 					' zero or one. Only valid for the evaluation per test'\
 					' sample', action='store_true')
+parser.add_argument('--train_cons_cuboids', help='Set the usage of overlapping'\
+					' cuboids for the training set', action='store_true')
 
 args = parser.parse_args()
 
@@ -73,6 +75,7 @@ anom_threshold = args.anom_threshold
 temp_threshold = args.temp_threshold
 output = args.output
 norm_zero_one = args.norm_zero_one
+train_cons_cuboids = args.train_cons_cuboids
 
 dot_pos = output.rfind('.')
 if dot_pos != -1:
@@ -97,6 +100,11 @@ if train_video_dir:
 										source=train_video_dir,
 										cub_frames=CUBOIDS_LENGTH,
 										prep_fn=resize_fn)
+
+		# Use overlapping cuboids for training set
+		if train_cons_cuboids:
+			data_train = istl.generators.ConsecutiveCuboidsGen(data_train)
+
 	except Exception as e:
 		print('Cannot load {}: '.format(train_video_dir), str(e), file=sys.stderr)
 		exit(-1)

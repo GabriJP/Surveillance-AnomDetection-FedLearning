@@ -666,7 +666,7 @@ class EvaluatorISTL(PredictorISTL):
 	## Methods ##
 	def evaluate_cuboids(self, cuboids: np.ndarray, labels: list or np.ndarray,
 					cum_cuboids_per_video: list or tuple or np.ndarray=None,
-					norm_zero_one=False):
+					norm_zero_one=False, return_rec_errors=True):
 
 		"""Evaluates the prediction of the trained ISTL model given the anomaly
 			threshold and temporal threshold provided. Aditionaly, all the false
@@ -702,6 +702,15 @@ class EvaluatorISTL(PredictorISTL):
 									return_scores=True,
 									cum_cuboids_per_video=cum_cuboids_per_video,
 									norm_zero_one=norm_zero_one)
+
+		# Compute reconstruction errors for each class
+		rec_errors = {}
+
+		if return_rec_errors:
+			rec_errors['dist_abnormal_class'] = [float(val) for val in scores[labels==1]]
+			rec_errors['dist_normal_class'] = [float(val) for val in scores[labels==0]]
+			
+
 		"""
 		scores = np.array(
 		[self.score_cuboid(cuboids[i]) for i in range(len(cuboids))]).squeeze()
@@ -731,8 +740,12 @@ class EvaluatorISTL(PredictorISTL):
 					self.__fp_cuboids = self.__fp_cuboids[:self.__max_cuboids + 1]
 
 
-		return EvaluatorISTL._compute_perf_metrics(labels, pred, scores,
+		ret = EvaluatorISTL._compute_perf_metrics(labels, pred, scores,
 																	true_scores)
+
+		# Append the reconstruction error per class
+		ret['reconstruction_error_norm'].update(rec_errors)
+		return ret
 
 	def _compute_perf_metrics(labels, pred, scores, true_scores=None):
 
@@ -943,7 +956,9 @@ class EvaluatorISTL(PredictorISTL):
 						'mean': scores.mean(),
 						'std': scores.std(),
 						'min': scores.min(),
-						'max': scores.max()
+						'max': scores.max(),
+						'dist_abnormal_class': [float(val) for val in scores[labels==1]],
+						'dist_normal_class': [float(val) for val in scores[labels==0]]
 					},
 				'reconstruction_error': {
 						'mean': true_scores.mean(),

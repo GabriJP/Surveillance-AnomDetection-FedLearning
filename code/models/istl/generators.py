@@ -517,12 +517,15 @@ class CuboidsGenerator(Sequence):
 		cubgens[0]._cuboids_info = []
 
 		# Select a random subpartition
-		for i in range(self._video_info):
+		for vid_inf in self._video_info:
 
 			# Determine the number of cuboids to extract from current video
 			# and the current index to get
-			part_size = np.round(port * self._video_info[i]['num_cuboids']).astype(int)
-			idx = self._video_info[i]['first_cuboid_index']
+			part_size = np.round(port * vid_inf['num_cuboids']).astype(int)
+
+			if not part_size: break
+
+			idx = vid_inf['first_cuboid_index']
 
 			# Add the selected cuboids if choosen to the subpartition and remove
 			# from the second one
@@ -1225,6 +1228,11 @@ class ConsecutiveCuboidsGen(Sequence):
 
 	def __len__(self):
 		return np.ceil(self.__access_frames[-1] / self.batch_size).astype(int)
+
+	@property
+	def num_cuboids(self):
+		"""Returns the real number of cuboids retrievable"""
+		return self.__access_frames[-1]
 
 	def __get_cuboid(self, idx: int):
 
