@@ -48,7 +48,7 @@ resize_fn = lambda img: np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY),
 ### Input Arguments
 parser = argparse.ArgumentParser(description='Trains an Incremental Spatio'\
 							' Temporal Learner model for the UCSD Ped 1 and'\
-							' UCSD Ped 2 datasets by using active learning on '\
+							' UCSD Ped 2 datasets on '\
 							'a federated  architecture')
 parser.add_argument('-d', '--document', help='JSON file containing the train'\
 					' parameters', type=str)

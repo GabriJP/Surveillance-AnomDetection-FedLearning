@@ -89,11 +89,13 @@ test_label = exp_data['test_label']
 data_train = istl.generators.CuboidsGeneratorFromImgs(
 		source=train_video_dir,
 		cub_frames=CUBOIDS_LENGTH,
-		prep_fn=resize_fn)
+		prep_fn=resize_fn,
+		max_cuboids=100000)
 
 data_test = istl.generators.CuboidsGeneratorFromImgs(source=test_video_dir,
 									cub_frames=CUBOIDS_LENGTH,
-									prep_fn=resize_fn)
+									prep_fn=resize_fn,
+									max_cuboids=100000)
 data_test = istl.generators.ConsecutiveCuboidsGen(data_test)
 test_labels = np.loadtxt(test_label, dtype='int8')
 
@@ -125,7 +127,8 @@ for p in params:
 	#################    Model preparation    ################
 	# Stochastic gradient descent algorithm
 	#sgd = SGD(learning_rate=p['lr'] if 'lr' in p else 1e-2)
-	adam = Adam(lr=1e-4, decay=p['lr_decay'] if 'lr_decay' in p else 0,
+	adam = Adam(lr=p['lr'] if 'lr' in p else 1e-4,
+			decay=p['lr_decay'] if 'lr_decay' in p else 0,
 				epsilon=1e-6)
 
 	istl_fed_model = SynFedAvgLearnModel(build_fn=istl.build_ISTL, n_clients=2,
@@ -379,6 +382,7 @@ for p in params:
 			patience = p['patience'] if 'patience' in p else 0
 			epochs = p['epochs'] if 'epochs' in p else 1
 			callbacks = {c:[LearningRateImprover(
+										initial_value=p['lr'] if 'lr' in p else 1e-4,
 										parameter='val_loss',
 										min_lr=1e-7, factor=0.9,
 										patience=patience,
@@ -561,6 +565,7 @@ for p in params:
 			patience = p['patience'] if 'patience' in p else 0
 			epochs = p['epochs'] if 'epochs' in p else 1
 			callbacks = {c:[LearningRateImprover(
+										initial_value=p['lr'] if 'lr' in p else 1e-4,
 										parameter='val_loss',
 										min_lr=1e-7, factor=0.9,
 										patience=patience,
