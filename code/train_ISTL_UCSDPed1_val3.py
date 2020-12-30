@@ -249,29 +249,44 @@ for p in params:
 														'norm_mode'))
 	for q in thresh_params:
 
+		istl_fed_model_copy = deepcopy(istl_fed_model)
+
 		### Evaluation of test set after 1st iteration
 		# Prepare to save results
 		q['results'] = {}
 		q['results']['test set'] = {}
 
-		evaluator = istl.EvaluatorISTL(model=istl_fed_model.global_model,
+		evaluator = istl.EvaluatorISTL(model=istl_fed_model_copy.global_model,
 										cub_frames=CUBOIDS_LENGTH,
 										anom_thresh=q['anom_thresh'],
 										temp_thresh=q['temp_thresh'])
 
+		for split in (train_split[0], train_split[1]):
+			split.batch_size = 1
+			split.return_cub_as_label = False
+
+		train_eval = istl.generators.CuboidsGenerator.merge(train_split[0],
+															train_split[1])
+
+
+		if q['norm_mode'] == 'train_samples':
+			train_rec_error = evaluator.fit(train_eval)
+		elif q['norm_mode'] == 'test_samples':
+			train_rec_error = evaluator.score_cuboids(train_eval, False)
+		else:
+			print('Unknow "{}" norm mode'.format(q['norm_mode']),
+					file=sys.stderr)
+			exit(-1)
+
+		q['training_rec_errors'] = {'1st iteration': {
+											'mean': train_rec_error.mean(),
+											'std': train_rec_error.std(),
+											'min': train_rec_error.min(),
+											'max': train_rec_error.max()
+										}}
+
 		# Fit the evaluator to the train samples if this normalization
 		#	mode is set
-		if q['norm_mode'] == 'train_samples':
-
-			for split in (train_split[0], train_split[1]):
-				split.batch_size = 1
-				split.return_cub_as_label = False
-
-			train_eval = istl.generators.CuboidsGenerator.merge(train_split[0],
-																train_split[1])
-
-			evaluator.fit(train_eval)
-
 		cum_cuboids_per_video = data_test.cum_cuboids_per_video if q['norm_mode'] == 'test_samples' else None
 		meas = evaluator.evaluate_cuboids(data_test, test_labels,
 											cum_cuboids_per_video)
@@ -283,7 +298,6 @@ for p in params:
 
 		print('Executing 2nd and 3rd iteration with parameters: {}'. format(q))
 
-		istl_fed_model_copy = deepcopy(istl_fed_model)
 		q['#experiment'] = len(results) + 1
 		q['force_relearning'] = (bool(q['force_relearning'])
 										if 'force_relearning' in q else False)
@@ -292,25 +306,6 @@ for p in params:
 
 		# Evaluate performance and retrieve false positive cuboids
 		# to train with them
-		evaluator = istl.EvaluatorISTL(model=istl_fed_model_copy.global_model,
-										cub_frames=CUBOIDS_LENGTH,
-										anom_thresh=q['anom_thresh'],
-										temp_thresh=q['temp_thresh'])
-
-		if q['norm_mode'] == 'train_samples':
-			train_rec_error = evaluator.fit(train_eval)
-		elif q['norm_mode'] == 'test_samples':
-			train_rec_error = evaluator.score_cuboids(train_eval, False)
-		else:
-			print('Unknow "{}" norm mode'.format(q['norm_mode']),
-					file=sys.stderr)
-
-		q['training_rec_errors'] = {'1st iteration': {
-											'mean': train_rec_error.mean(),
-											'std': train_rec_error.std(),
-											'min': train_rec_error.min(),
-											'max': train_rec_error.max()
-										}}
 
 
 		#q['results']['2nd iteration'] = {}
