@@ -26,10 +26,15 @@ import warnings
 from copy import copy, deepcopy
 from bisect import bisect_right
 import numpy as np
+from cv2 import resize
 from tensorflow.keras import Model, Sequential, Input
 from tensorflow.keras.layers import (Conv2D, ConvLSTM2D, Conv2DTranspose,
-										TimeDistributed, LayerNormalization)
+										TimeDistributed, LayerNormalization,
+										Lambda, Reshape)
+from tensorflow import image as tf_image
 from tensorflow.keras.layers import Conv3D, Conv3DTranspose
+from tensorflow import math as tf_math
+from tensorflow import transpose as tf_transpose
 from sklearn.metrics import roc_auc_score
 from utils import confusion_matrix, equal_error_rate
 #from persistence1d.filter_noise import filter_noise
@@ -157,6 +162,14 @@ def build_abnor_evant_STA():
 
 	return model
 
+def root_sum_squared_error(inputs):
+
+	#if K.ndim(y_true) > 2:
+	#	return K.mean(K.sqrt(K.sum(K.square(y_true - y_pred),
+	#				axis=K.arange(1, K.ndim(y_true)) )))
+	#else:
+	return tf_math.sqrt(tf_math.reduce_sum(tf_math.square(inputs[0] - inputs[1]), axis=(1,2,3,4)))
+
 class ScorerISTL:
 
 	"""Handler class for the cuboids scoring through a previous trained
@@ -185,6 +198,10 @@ class ScorerISTL:
 		# Copy to the object atributes
 		self.__model = model
 		self.__cub_frames = cub_frames
+
+		# Add extra layer to the model for the parallel computation of reconstrucion error
+		self.__rec_error = Lambda(root_sum_squared_error)([self.__model.layers[0].input, self.__model.layers[-1].output])
+		self._rec_model = Model(inputs=self.__model.layers[0].input, outputs=self.__rec_error)
 
 		# The minimum and maximum reconstruction error values commited by the
 		# input model for the training cuboids used for normalize scores
@@ -285,7 +302,8 @@ class ScorerISTL:
 		rec_error = np.square(rec_error.sum())
 		"""
 
-		score = np.sqrt(np.sum((cuboid - self.__model.predict(cuboid))**2))
+		#score = np.sqrt(np.sum((cuboid - self.__model.predict(cuboid))**2))
+		score = self._rec_model.predict(cuboid)
 
 		#if scale_scores:
 		#	score = (score - self.__min_score_cub) / self.__max_score_cub
@@ -329,26 +347,35 @@ class ScorerISTL:
 			raise TypeError('"norm_zero_one" must be bool')
 
 		# Procedure
+		"""
 		ret = np.zeros(len(cub_set), dtype='float64')
 
 		for i in range(len(cub_set)):
 			ret[i] = self.score_cuboid(cub_set[i])
+		"""
+		ret = self._rec_model.predict(cub_set)
+		ret = self._scale_scores(ret, scale_scores, norm_zero_one)
+
+		return ret
+
+	def _scale_scores(self, scores: np.array,
+							scale_scores=True, norm_zero_one=False):
 
 		if isinstance(scale_scores, bool) and scale_scores:
 
 			if self.__min_score_cub is None:
-				min_value = ret.min()
-				max_value = ret.max()
+				min_value = scores.min()
+				max_value = scores.max()
 			else:
 				min_value = self.__min_score_cub
 				max_value = self.__max_score_cub
 
-			ret = ((ret - min_value)/(max_value - min_value), ret)
+			scores = ((scores - min_value)/(max_value - min_value), scores)
 			#ret = ((ret - min_value)/max_value, ret)
 
 		elif isinstance(scale_scores, (tuple, list, np.ndarray)):
 
-			ret_norm = np.zeros(ret.size, dtype=ret.dtype)
+			scores_norm = np.zeros(scores.size, dtype=scores.dtype)
 
 			# Perform normalization per video
 			for i in range(len(scale_scores)):
@@ -356,27 +383,25 @@ class ScorerISTL:
 				start = scale_scores[i-1] if i > 0 else 0 # Starting video cuboid
 				end = scale_scores[i]						# Ending video cuboid
 
-				min_value = ret[start: end].min()
-				max_value = ret[start: end].max()
+				min_value = scores[start: end].min()
+				max_value = scores[start: end].max()
 				#min_value = ret[start: end].mean()
 				#max_value = ret[start: end].std()
 
 				if not norm_zero_one:
-					ret_norm[start: end] = ((ret[start: end] - min_value) /
+					scores_norm[start: end] = ((scores[start: end] - min_value) /
 														(max_value))
 				else:
-					ret_norm[start: end] = ((ret[start: end] - min_value) /
+					scores_norm[start: end] = ((scores[start: end] - min_value) /
 														(max_value - min_value))
 
 				# Filter the more persistence optima
 				#ret_norm[start: end] = filter_noise(ret_norm[start: end],
 				#						(ret_norm[start: end].max() -
 				#							ret_norm[start: end].min())*0.2)
-			ret = (ret_norm, ret)
+			scores = (scores_norm, scores)
 
-		return ret
-
-		#return np.apply_along_axis(self.score_cuboid, axis=0, )
+		return scores
 
 
 	def fit(self, cub_set: np.array or list or tuple):
@@ -485,8 +510,9 @@ class PredictorISTL(ScorerISTL):
 			Return: bool, True if anomaly, False otherwise
 		"""
 
-		return (self.score_cuboids(np.expand_dims(cuboid, axis=0), True)[0] >
-															self.__anom_thresh)
+		#return (self.score_cuboids(np.expand_dims(cuboid, axis=0), True)[0] >
+		#													self.__anom_thresh)
+		return self.score_cuboid(cuboid)[0] > self.__anom_thresh
 
 	def predict_cuboids(self, cub_set, return_scores=False,
 			cum_cuboids_per_video: list or tuple or np.ndarray=None,
@@ -611,6 +637,344 @@ class PredictorISTL(ScorerISTL):
 
 		return False
 	"""
+
+class LocalizatorISTL(PredictorISTL):
+
+	"""Handler class for both temporal and spacial anomaly localization by a
+		previous trained ISTL model throgh the original method proposed by [1].
+
+		Attributes
+		----------
+
+		model : tf.keras.Model
+			Keras Model containing a pre-trained ISTL model
+
+		cub_frames : int
+			Number of frames conforming the cuboids
+
+		anom_thresh : float
+			Anomaly Threshold for wich, a input cuboid is considered anomalous
+			if its reconstruction error exceed it
+
+		temp_thresh : int
+			Number of consecutive cuboids classified as a anomalous (e.g. its
+			reconstruction error exceed the anomalous threshold) required to
+			consider a segment as anomalous.
+
+		subwind_size: array type containing two int values.
+			Size of the sub-windows in which the original cuboids will be
+			subdivided to analyse the anomalies' spatial location
+
+	"""
+	def __init__(self, model: Model, cub_frames: int, anom_thresh: float,
+										temp_thresh: int, subwind_size: tuple):
+		super(LocalizatorISTL, self).__init__(model, cub_frames, anom_thresh,
+																	temp_thresh)
+		# Private attributes
+		self.subwind_size = subwind_size
+		self._loc_model, self._base_loc_model = self.__build_localizator_model()
+
+	@property
+	def subwind_size(self):
+		return self.__subwind_size
+
+	@subwind_size.setter
+	def subwind_size(self, subwind_size):
+
+		if not (hasattr(subwind_size, '__getitem__') and hasattr(subwind_size, '__len__')):
+			raise TypeError('"subwind_size" must be an array type object')
+
+		if not (len(subwind_size) == 2 and
+				all(isinstance(v, int) and v > 0 for v in subwind_size)):
+			raise ValueError('"subwind_size" must be a two-int tuple greater than 0')
+
+		self.__subwind_size = subwind_size
+
+	def predict_cuboids(self, cub_set, return_scores=False,
+			cum_cuboids_per_video: list or tuple or np.ndarray=None,
+			norm_zero_one=False, only_tensors=True) -> tuple:
+
+		"""For each cuboid retrievable from a cuboid's collection (i.e.
+			array-like object of cuboids or any genereator of cuboids), predicts
+			wheter the cuboid is anomalous or not (i.e. its represents an
+			anormal event or a normal event) and localizes the anomalies spatial
+			location.
+
+			A cuboid is considered anomalous when its reconstruction error is
+			higher than the anomaly threshold and there's a number of anomalous
+			consecutive cuboids greater than the temporal threshold
+
+			Parameters
+			----------
+				cub_set: indexable and length-known collection of cuboids.
+				(array, list or tuple of cuboids, generator of cuboids)
+				Array, list, tuple or any generator of cuboids to be scored
+
+				return_scores : bool (default False)
+					Return the score associated to each cuboids or not.
+
+					If true the function will return a tuple containing the
+					vector with the predictions and the vector with the scores,
+					if false, only the prediction vector is returned
+
+				cum_cuboids_per_video : array-like
+					array, list or tuple containing the cumulative cuboids
+					of each video.
+
+				only_tensors: bool
+					Set True to make all the spatial analysis through Tensorial
+					operations which are executed on GPU (if Tensorflow is
+					configured to do so) which uses more memory of False to
+					let the CPU to perform the first preprocessing steps.
+
+			Raise
+			-----
+
+			ValueError: cub_set is not indexable or its length cannot be known
+			ValueError: Any cuboid is not a valid numpy ndarray
+
+			Return:
+				- 8-bit int numpy array vector with the prediction
+				for each collection's cuboid if return_scores is False
+				or a tuple with the prediction vector and the 64-bit float
+				numpy array vector containing the reconstruction error
+				associated to each cuboid.
+
+				- Dict specifying for each anomalous cuboid the upper left
+				corners of anomalous subwindows detected
+		"""
+
+		# Check input
+		if not isinstance(only_tensors, bool):
+			raise TypeError('only_tensors must be boolean')
+
+		# Get prediction and scores if returned
+		ret = super(EvaluatorISTL, self).predict_cuboids(
+													cub_set,
+													return_scores,
+													cum_cuboids_per_video,
+													norm_zero_one)
+
+		if not isinstance(ret, tuple):
+			ret = (ret,)
+
+		# Perform spatial-analysis on anomalous cuboids
+		preds = ret[0]
+
+		det = self.spatial_loc_anomalies(cub_set, preds, only_tensors)
+
+		ret = ret + (det,)
+		return ret
+
+	def __build_localizator_model(self):	
+
+		"""
+		original_shape = cuboid.shape[1:]
+		split_cub_shape = (cuboid.shape[1],
+							cuboid.shape[2]//self.__subwind_size[0],
+							self.__subwind_size[0],
+							cuboid.shape[3]//self.__subwind_size[1],
+							self.__subwind_size[1], cuboid.shape[4])
+
+		split_cub = cuboid.reshape(split_cub_shape)
+
+		# Shift the cumuled axis to the first axises
+		split_cub = np.rollaxis(split_cub, 1, 0)
+		split_cub = np.rollaxis(split_cub, 3, 1)
+
+		split_cub = split_cub.reshape((-1,) + split_cub.shape[2:])
+		"""
+
+		cub_length, width, height, channels = self._rec_model.input.shape[1:]
+		split_cub_shape = (cub_length,
+							width//self.__subwind_size[0],
+							self.__subwind_size[0],
+							height//self.__subwind_size[1],
+							self.__subwind_size[1], channels)
+
+		# Make base model
+		base_input_layer = Input(shape=(cub_length, self.__subwind_size[0], self.__subwind_size[1], channels))
+		base_resize_layer = TimeDistributed(Lambda(lambda x: tf_image.resize(x, (width, height))) )(base_input_layer)
+		base_rec_model = self._rec_model(base_resize_layer)
+
+		base_model = Model(inputs=base_input_layer, outputs=base_rec_model)
+
+		# Add resizing layers at first of to the rec model to resize the tensors
+		# to the input accepted by the model
+		input_layer = Input(shape=(cub_length, width, height, channels))
+		# Split cuboid in subcuboids
+		split_layer = Reshape(split_cub_shape)(input_layer)
+		permut_dim_layer = Lambda(lambda x: tf_transpose(x, [0, 2, 4, 1, 3, 5, 6]))(split_layer)
+		acum_dim_layer = Reshape((split_cub_shape[2]*split_cub_shape[4], cub_length, self.__subwind_size[0], self.__subwind_size[1], channels))(permut_dim_layer)
+		# Resize each subcuboid at full cuboid size
+		rec_model = TimeDistributed(base_model)(acum_dim_layer)
+		# Predict each subcuboid
+		#rec_model = self._rec_model(rec_model)
+
+		model = Model(inputs=input_layer, outputs=rec_model)
+		return model, base_model
+
+		"""
+		cub_length, width, height, channels = self._rec_model.input.shape[1:]
+
+		# Add resizing layers at first of to the rec model to resize the tensors
+		# to the input accepted by the model
+		input_layer = Input(shape=(cub_length, self.__subwind_size[0], 
+									self.__subwind_size[1], channels))
+		resize_layer = TimeDistributed(Lambda(lambda x: tf_image.resize(x, (width, height))) )(input_layer)
+		rec_model = self._rec_model(resize_layer)
+
+		model = Model(inputs=input_layer, outputs=rec_model)
+		return model
+		"""
+
+	def spatial_loc_anomalies(self, cub_set, preds=None, only_tensors=True):
+
+		"""
+			Performs spatial location of a set of predicted cuboids through
+			sub-windows scannation by the given sub-windows size.
+
+			Parameters
+			----------
+
+			cub_set: indexable and length-known collection of cuboids.
+			(array, list or tuple of cuboids, generator of cuboids)
+			Array, list, tuple or any generator of cuboids to be scored
+
+			preds: 8-bits int Numpy array
+			Binary array of predictions given for each cuboid of
+			the cuboid set.
+
+			subwind_size: 2-int tuple
+			Tuple containing the width and the height of the desired subwindows.
+
+			only_tensors: bool
+				Set True to make all the spatial analysis through Tensorial
+				operations which are executed on GPU (if Tensorflow is
+				configured to do so) which uses more memory of False to
+				let the CPU to perform the first preprocessing steps.
+
+			Return
+			------
+			Dict containing a list of the indexes of the anomalous sub-windows
+				for each anomalous cuboid index
+		"""
+
+		# Check input
+		if not hasattr(cub_set, '__getitem__') or not hasattr(cub_set,'__len__'):
+			raise TypeError('Input cuboid\'s collection must have '\
+								'__getitem__ and __len__ methods')
+
+		if preds is not None and (not hasattr(preds, '__getitem__') or not hasattr(preds,'__len__')):
+			raise TypeError('Prediction array must be an array type containing'\
+							'a label for each cuboid')
+
+		if preds is not None and len(cub_set) != len(preds):
+			raise ValueError('The cuboid set and the pediction array must be'\
+								' of the same length')
+
+		if not isinstance(only_tensors, bool):
+			raise TypeError('only_tensors must be boolean')
+		"""
+		if not hasattr(subwind_size, ('__getitem__', '__len__')):
+			raise TypeError('"subwind_size" must be an array type object')
+
+		if not (len(subwind_size) != 2 and
+				all(isinstance(v, int) and v > 0 for v in subwind_size)):
+			raise ValueError('"subwind_size" must be a two-int tuple greater '\
+								'than 0')
+		"""
+
+		pos_preds = np.where(preds == 1)[0] if preds is not None else np.arange(len(cub_set))
+
+		rows = cub_set[0].shape[2]
+		cols = cub_set[0].shape[3]
+
+		idxs = np.array([[i, j] for i in range(0, rows, self.__subwind_size[0])
+								for j in range(0, cols, self.__subwind_size[1])])
+
+		det = {}
+
+		# Scan all the anomalous cuboids returning the location
+		# of all anomalous sub-windows
+		for i in pos_preds:
+			ret = self.__cuboid_scannation(cub_set[i], idxs, only_tensors)
+
+			if ret is not None:
+				det[i] = ret
+
+		return det
+
+	def __cuboid_scannation(self, cuboid: np.ndarray, idxs: np.ndarray, only_tensors: bool):
+
+		"""
+		# Remove the extra dimension
+		if cuboid.shape[0] == 1:
+			cuboid = cuboid.reshape(*cuboid.shape[1:])
+
+		dst_shape = cuboid.shape[1:-1]
+		areas = []
+
+		for i, j in idxs:
+			# Get the sub-window
+			sli = cuboid[:, i: max(i + self.__subwind_size[0],
+										cuboid.shape[1]),
+							j: max(j + self.__subwind_size[1],
+										cuboid.shape[2])]
+
+			# Resize the sliced cuboid to be scored through the model
+			amp_cub = np.expand_dims(
+						np.array([resize(fr, dsize=dst_shape) for fr in sli]),
+						axis=(0,-1)) #np.apply_along_axis(resize, 0, cuboid, dsize=dst_shape) #LocalizatorISTL.__vect_resize(sli, dst_shape)
+
+			if self.predict_cuboid(amp_cub):
+				areas.append((i, j))
+
+		return areas
+		
+		original_shape = cuboid.shape[1:]
+		split_cub_shape = (cuboid.shape[1],
+							cuboid.shape[2]//self.__subwind_size[0],
+							self.__subwind_size[0],
+							cuboid.shape[3]//self.__subwind_size[1],
+							self.__subwind_size[1], cuboid.shape[4])
+
+		split_cub = cuboid.reshape(split_cub_shape)
+
+		# Shift the cumuled axis to the first axises
+		split_cub = np.rollaxis(split_cub, 1, 0)
+		split_cub = np.rollaxis(split_cub, 3, 1)
+
+		split_cub = split_cub.reshape((-1,) + split_cub.shape[2:])
+		"""
+
+		# Score each split by the localizator model
+		if only_tensors:
+			pred = self._loc_model.predict(cuboid)#split_cub)
+		else:
+			original_shape = cuboid.shape[1:]
+			split_cub_shape = (cuboid.shape[1],
+								cuboid.shape[2]//self.__subwind_size[0],
+								self.__subwind_size[0],
+								cuboid.shape[3]//self.__subwind_size[1],
+								self.__subwind_size[1], cuboid.shape[4])
+
+			split_cub = cuboid.reshape(split_cub_shape)
+
+			# Shift the cumuled axis to the first axises
+			split_cub = np.rollaxis(split_cub, 1, 0)
+			split_cub = np.rollaxis(split_cub, 3, 1)
+
+			split_cub = split_cub.reshape((-1,) + split_cub.shape[2:])
+
+			pred = self._base_loc_model.predict(split_cub)
+
+		pred = self._scale_scores(pred, True)[0]
+		pred = pred > self.anom_thresh
+
+		return idxs[pred] if pred.any() else None
+
+	#__vect_resize = np.vectorize(resize, excluded={'dsize', 'fx', 'fy', 'interpolation'})
 
 class EvaluatorISTL(PredictorISTL):
 
@@ -783,7 +1147,7 @@ class EvaluatorISTL(PredictorISTL):
 				'recall': float(cm[1, 1] / (cm[1, 1] + cm[1, 0])),
 				'specificity': float(cm[0, 0] / (cm[0, 0] + cm[0, 1])),
 				'AUC': float(auc),
-				'EER': eer
+				'EER': float(eer)
 			}
 
 		try:
@@ -803,20 +1167,20 @@ class EvaluatorISTL(PredictorISTL):
 								}
 
 		ret['reconstruction_error_norm'] = {
-										'mean': scores.mean(),
-										'std': scores.std(),
-										'min': scores.min(),
-										'max': scores.max()
+										'mean': float(scores.mean()),
+										'std': float(scores.std()),
+										'min': float(scores.min()),
+										'max': float(scores.max())
 									}
 
 		ret['class_reconstruction_error_norm'] = {}
 
 		try:
 			ret['class_reconstruction_error_norm']['Normal'] = {
-												'mean': scores[labels==0].mean(),
-												'std': scores[labels==0].std(),
-												'min': scores[labels==0].min(),
-												'max': scores[labels==0].max()
+												'mean': float(scores[labels==0].mean()),
+												'std': float(scores[labels==0].std()),
+												'min': float(scores[labels==0].min()),
+												'max': float(scores[labels==0].max())
 											}
 		except Exception as e:
 			ret['class_reconstruction_error_norm']['Normal'] = {
@@ -832,10 +1196,10 @@ class EvaluatorISTL(PredictorISTL):
 
 		try:
 			ret['class_reconstruction_error_norm']['Abnormal'] = {
-												'mean': scores[labels==1].mean(),
-												'std': scores[labels==1].std(),
-												'min': scores[labels==1].min(),
-												'max': scores[labels==1].max()
+												'mean': float(scores[labels==1].mean()),
+												'std': float(scores[labels==1].std()),
+												'min': float(scores[labels==1].min()),
+												'max': float(scores[labels==1].max())
 										}
 		except Exception as e:
 			ret['class_reconstruction_error_norm']['Abnormal'] = {
@@ -850,10 +1214,10 @@ class EvaluatorISTL(PredictorISTL):
 
 		if true_scores is not None:
 			ret['reconstruction_error'] = {
-											'mean': true_scores.mean(),
-											'std': true_scores.std(),
-											'min': true_scores.min(),
-											'max': true_scores.max()
+											'mean': float(true_scores.mean()),
+											'std': float(true_scores.std()),
+											'min': float(true_scores.min()),
+											'max': float(true_scores.max())
 										}
 
 			ret['class_reconstruction_error'] = {}
@@ -862,10 +1226,10 @@ class EvaluatorISTL(PredictorISTL):
 
 			try:
 				ret['class_reconstruction_error']['Normal'] = {
-										'mean': true_scores[labels==0].mean(),
-										'std': true_scores[labels==0].std(),
-										'min': true_scores[labels==0].min(),
-										'max': true_scores[labels==0].max()
+										'mean': float(true_scores[labels==0].mean()),
+										'std': float(true_scores[labels==0].std()),
+										'min': float(true_scores[labels==0].min()),
+										'max': float(true_scores[labels==0].max())
 										}
 			except Exception as e:
 				ret['class_reconstruction_error']['Normal'] = {
@@ -880,10 +1244,10 @@ class EvaluatorISTL(PredictorISTL):
 
 			try:
 				ret['class_reconstruction_error']['Abnormal'] = {
-										'mean': true_scores[labels==1].mean(),
-										'std': true_scores[labels==1].std(),
-										'min': true_scores[labels==1].min(),
-										'max': true_scores[labels==1].max()
+										'mean': float(true_scores[labels==1].mean()),
+										'std': float(true_scores[labels==1].std()),
+										'min': float(true_scores[labels==1].min()),
+										'max': float(true_scores[labels==1].max())
 									}
 			except Exception as e:
 				ret['class_reconstruction_error']['Abnormal'] = {
@@ -959,18 +1323,18 @@ class EvaluatorISTL(PredictorISTL):
 		scores, true_scores = self.score_cuboids(cuboids, scale, norm_zero_one)
 		meas = {
 				'reconstruction_error_norm': {
-						'mean': scores.mean(),
-						'std': scores.std(),
-						'min': scores.min(),
-						'max': scores.max(),
+						'mean': float(scores.mean()),
+						'std': float(scores.std()),
+						'min': float(scores.min()),
+						'max': float(scores.max()),
 						'dist_abnormal_class': [float(val) for val in scores[labels==1]],
 						'dist_normal_class': [float(val) for val in scores[labels==0]]
 					},
 				'reconstruction_error': {
-						'mean': true_scores.mean(),
-						'std': true_scores.std(),
-						'min': true_scores.min(),
-						'max': true_scores.max()
+						'mean': float(true_scores.mean()),
+						'std': float(true_scores.std()),
+						'min': float(true_scores.min()),
+						'max': float(true_scores.max())
 					},
 				'results': []
 		}

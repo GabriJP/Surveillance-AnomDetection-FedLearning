@@ -153,10 +153,10 @@ except Exception as e:
 
 if data_train is not None:
 	all_meas['training_rec_error'] = {
-									'mean': sc_train.mean(),
-									'std': sc_train.std(),
-									'min': sc_train.min(),
-									'max': sc_train.max()
+									'mean': float(sc_train.mean()),
+									'std': float(sc_train.std()),
+									'min': float(sc_train.min()),
+									'max': float(sc_train.max())
 									}
 
 # Save the results

@@ -13,7 +13,7 @@ import sys
 import json
 import argparse
 import numpy as np
-from cv2 import imread, imwrite, resize, cvtColor, COLOR_BGR2GRAY
+from cv2 import imread, imwrite, resize, cvtColor, COLOR_BGR2GRAY, COLOR_GRAY2BGR, rectangle, addWeighted
 import tensorflow
 from tensorflow.keras.models import load_model
 import matplotlib.pyplot as plt
@@ -38,9 +38,49 @@ CUBOIDS_LENGTH = 8
 CUBOIDS_WIDTH = 224
 CUBOIDS_HEIGHT = 224
 
+SUBWIND_WIDTH = 16
+SUBWIND_HEIGHT = 16
+
+SUBWIND_TP = np.zeros((CUBOIDS_WIDTH, CUBOIDS_HEIGHT, 3), dtype=np.uint8)
+SUBWIND_TP[:,:,0] = 255
+SUBWIND_TP[:,:,1] = 188
+
+SUBWIND_FP = np.zeros((CUBOIDS_WIDTH, CUBOIDS_HEIGHT, 3), dtype=np.uint8)
+SUBWIND_FP[:,:,0] = 255
+
+
 # Image resize function
 resize_fn = lambda img: np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY),
 						(CUBOIDS_WIDTH, CUBOIDS_HEIGHT))/255, axis=2)
+
+def group_points_in_ranges(points: np.array):
+
+	# Check input
+	if not isinstance(points, np.ndarray):
+		raise TypeError('points must be a numpy array')
+
+	if points.size == 0 or points.ndim != 1:
+		raise ValueError('points must be 1D array with data')
+
+	ranges = []
+
+	start_idx = 0
+	idx = start_idx
+
+	while idx < points.size:
+		if points[idx] != points[start_idx]:
+			# Register the limits of each group
+			ranges.append((points[start_idx], (start_idx, idx - 1)))
+
+			start_idx = idx
+
+		idx += 1
+	else:
+		ranges.append((points[start_idx], (start_idx, idx - 1)))
+
+
+	return ranges
+
 
 ### Input Arguments
 parser = argparse.ArgumentParser(description='Test an Incremental Spatio'\
@@ -61,6 +101,10 @@ parser.add_argument('-t', '--temp_threshold',
 					nargs=1)
 parser.add_argument('-o', '--output', help='Output file in which the results'\
 					' will be located', type=str)
+parser.add_argument('-s', '--spatial_location', help='Perform spatial location'\
+					' of cuboids',
+					action='store_true', default=False)
+
 
 args = parser.parse_args()
 
@@ -71,6 +115,7 @@ labels_path = args.labels
 anom_threshold = args.anom_threshold[0]
 temp_threshold = args.temp_threshold[0]
 output = args.output
+spatial_location = args.spatial_location
 
 """
 dot_pos = output.rfind('.')
@@ -155,24 +200,24 @@ except Exception as e:
 meas = {}
 if data_train is not None:
 	meas['training_rec_error'] = {
-								'mean': sc_train.mean(),
-								'std': sc_train.std(),
-								'min': sc_train.min(),
-								'max': sc_train.max()
+								'mean': float(sc_train.mean()),
+								'std': float(sc_train.std()),
+								'min': float(sc_train.min()),
+								'max': float(sc_train.max())
 								}
 
 meas['test_rec_error'] = {
-						'mean': true_scores_test.mean(),
-						'std': true_scores_test.std(),
-						'min': true_scores_test.min(),
-						'max': true_scores_test.max()
+						'mean': float(true_scores_test.mean()),
+						'std': float(true_scores_test.std()),
+						'min': float(true_scores_test.min()),
+						'max': float(true_scores_test.max())
 						}
 
 meas['test_rec_error_norm'] = {
-						'mean': scores_test.mean(),
-						'std': scores_test.std(),
-						'min': scores_test.min(),
-						'max': scores_test.max()
+						'mean': float(scores_test.mean()),
+						'std': float(scores_test.std()),
+						'min': float(scores_test.min()),
+						'max': float(scores_test.max())
 						}
 
 meas['results'] = istl.EvaluatorISTL._compute_perf_metrics(
@@ -199,22 +244,47 @@ for i in range(len(scores_test_sep)):
 	comp[(pred_sep[i]==0) & (test_labels_sep[i]==1)] = 2 # FN
 	comp[(pred_sep[i]==1) & (test_labels_sep[i]==0)] = 3 # FP
 
-	# Graph true labels and predictions
-	#fig, ax = plt.subplots(ncols=3)
+	groups = group_points_in_ranges(comp)
+	true_labels = group_points_in_ranges(test_labels_sep[i])
 
 	# 	True labels
-	plt.plot(idxs[test_labels_sep[i]==0], scores_test_sep[i][test_labels_sep[i]==0], '.', label='Normal')
-	plt.plot(idxs[test_labels_sep[i]==1], scores_test_sep[i][test_labels_sep[i]==1], '.', label='Abnormal')
-	plt.plot(idxs, np.repeat(anom_threshold, repeats=len(idxs)), '--', label='Anom threshold')
-	plt.legend()
+
+	#	Plot areas
+	plt.figure(figsize=(12.8, 4.8))
+	for gr in groups:
+		if gr[0] == 0: continue
+		plt.axvspan(ymin=0, ymax=1, xmin=gr[1][0], xmax=gr[1][1]+0.5, alpha=0.3,
+					color='tab:orange' if gr[0] == 1 else 'tab:red' if gr[0] == 3 else 'tab:purple',
+					label='True Positive' if gr[0] == 1 else 'False Positive' if gr[0] == 3 else 'False Negative')
+
+	#	Plor lines
+	for idx, tl in enumerate(true_labels):
+		plt.plot(idxs[tl[1][0]: tl[1][1] + 1], scores_test_sep[i][tl[1][0]: tl[1][1] + 1],
+				label='Normal' if tl[0] == 0 else 'Abnormal',
+				color='tab:orange' if tl[0] == 1 else 'tab:blue')
+
+		# Plot a line linking to the previous plotted line
+		if idx < len(true_labels)-1:
+			plt.plot((tl[1][1], true_labels[idx+1][1][0]), (scores_test_sep[i][tl[1][1]], scores_test_sep[i][true_labels[idx+1][1][0]]),
+					label='Normal' if tl[0] == 0 else 'Abnormal',
+					color='tab:orange' if tl[0] == 1 else 'tab:blue')
+
+	#plt.plot(idxs[test_labels_sep[i]==0], scores_test_sep[i][test_labels_sep[i]==0], '.', label='Normal')
+	#plt.plot(idxs[test_labels_sep[i]==1], scores_test_sep[i][test_labels_sep[i]==1], '.', label='Abnormal')
+	plt.plot(idxs, np.repeat(anom_threshold, repeats=len(idxs)), '--', label='Anom threshold', color='tab:green')
+	handles, labels = plt.gca().get_legend_handles_labels()
+	by_label = dict(zip(labels, handles))
+	plt.legend(by_label.values(), by_label.keys())
 	plt.title('Ground Truth')
 	plt.xlabel('frames')
 	plt.ylabel('Rec Error Norm')
 
-	plt.savefig(plt_fname+'_ground_truth.svg')
+	plt.savefig(plt_fname+'_ground_truth.pdf')
 	plt.close()
 
+"""
 	# 	Predictions
+	plt.figure(figsize=(12.8, 4.8))
 	plt.plot(idxs[pred_sep[i]==0], scores_test_sep[i][pred_sep[i]==0], '.', label='Normal')
 	plt.plot(idxs[pred_sep[i]==1], scores_test_sep[i][pred_sep[i]==1], '.', label='Abnormal')
 	plt.plot(idxs, np.repeat(anom_threshold, repeats=len(idxs)), '--', label='Anom threshold')
@@ -239,7 +309,68 @@ for i in range(len(scores_test_sep)):
 
 	plt.savefig(plt_fname+'_comparation.svg')
 	plt.close()
+"""
 
 # Save the results
 with open(os.path.join(output, 'measures.json'), 'w') as f:
 	json.dump(meas, f, indent=4)
+
+## Perform spatial location
+if spatial_location:
+
+	localizator = istl.LocalizatorISTL(model=model,
+										cub_frames=CUBOIDS_LENGTH,
+										anom_thresh=anom_threshold,
+										temp_thresh=temp_threshold,
+										subwind_size=(SUBWIND_WIDTH,
+														SUBWIND_HEIGHT))
+	anom_areas = localizator.spatial_loc_anomalies(data_test, pred, full_GPU=False)
+
+	cub_idx = 0
+	for i in range(len(pred_sep)):
+
+		out_dir = os.path.join(output, '-test{}'.format(i + 1))
+
+		# Prepare the output directory
+		if not os.path.isdir(out_dir):
+			try:
+				os.mkdir(out_dir)
+			except Exception as e:
+				print('Cannot save the reconstructed frames: ', str(e))
+				exit(-1)
+
+		# Save all the frames
+		for c in range(len(pred_sep[i])):
+
+			cub = data_test[cub_idx + c]
+
+			# Process all the frames wheter the last cuboid
+			if c == len(pred_sep[i]) - 1:
+				fr = cub
+			else:
+				fr = [cub[0]]
+
+			fr = [cvtColor(f, COLOR_GRAY2BGR) for f in fr]
+
+			for f in range(len(fr)):
+
+				# Draw the anomalous subwindows if found
+				if (cub_idx + c) in anom_areas:
+					recs = anom_areas[cub_idx + c]
+
+
+					for x, y in recs:
+						rectangle(fr[f], (x-(SUBWIND_WIDTH/2), y+(SUBWIND_HEIGHT/2)),
+										(x+(SUBWIND_WIDTH/2), y-(SUBWIND_HEIGHT/2)),
+										 (255, 188, 0) if pred_sep[i][c] == test_labels_sep[i][c] else (255, 0, 0),
+										2)
+
+						if pred_sep[i][c] == test_labels_sep[i][c]:
+							fr[f] = addWeighted(fr[f], 0.4, SUBWIND_TP[y-(SUBWIND_WIDTH/2): y+(SUBWIND_WIDTH/2), x-(SUBWIND_WIDTH/2): x+(SUBWIND_WIDTH/2)], 0.5, 1)
+						else:
+							fr[f] = addWeighted(fr[f], 0.4, SUBWIND_FP[y-(SUBWIND_WIDTH/2): y+(SUBWIND_WIDTH/2), x-(SUBWIND_WIDTH/2): x+(SUBWIND_WIDTH/2)], 0.5, 1)
+			
+				imwrite(out_dir + '/' + 'frame{}.png'.format(c + f), cub)
+
+		cub_idx += len(pred_sep[i])
+

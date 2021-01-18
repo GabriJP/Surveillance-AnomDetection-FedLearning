@@ -279,10 +279,10 @@ for p in params:
 			exit(-1)
 
 		q['training_rec_errors'] = {'1st iteration': {
-											'mean': train_rec_error.mean(),
-											'std': train_rec_error.std(),
-											'min': train_rec_error.min(),
-											'max': train_rec_error.max()
+											'mean': float(train_rec_error.mean()),
+											'std': float(train_rec_error.std()),
+											'min': float(train_rec_error.min()),
+											'max': float(train_rec_error.max())
 										}}
 
 		# Fit the evaluator to the train samples if this normalization
@@ -466,10 +466,10 @@ for p in params:
 						file=sys.stderr)
 
 			q['training_rec_errors']['2nd iteration'] = {
-											'mean': train_rec_error.mean(),
-											'std': train_rec_error.std(),
-											'min': train_rec_error.min(),
-											'max': train_rec_error.max()
+											'mean': float(train_rec_error.mean()),
+											'std': float(train_rec_error.std()),
+											'min': float(train_rec_error.min()),
+											'max': float(train_rec_error.max())
 										}
 
 			### Evaluation of test set
@@ -639,10 +639,10 @@ for p in params:
 						file=sys.stderr)
 
 			q['training_rec_errors']['3rd iteration'] = {
-											'mean': train_rec_error.mean(),
-											'std': train_rec_error.std(),
-											'min': train_rec_error.min(),
-											'max': train_rec_error.max()
+											'mean': float(train_rec_error.mean()),
+											'std': float(train_rec_error.std()),
+											'min': float(train_rec_error.min()),
+											'max': float(train_rec_error.max())
 										}
 
 		else:
