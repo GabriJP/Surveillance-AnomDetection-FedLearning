@@ -1,0 +1,18 @@
+{
+  "train_video_dir": "UCSD_Anomaly_Dataset.v1p2/UCSDped1/Train/",
+  "test_video_dir": "UCSD_Anomaly_Dataset.v1p2/UCSDped1/TestISTL/",
+  "test_label": "UCSD_Anomaly_Dataset.v1p2/UCSDped1/TestISTL/UCSDPed1_labels_8T_cuboids.txt",
+  "seed": 312546,
+  "batch_size": 20,
+  "shuffle": 1,
+  "partitions": [0.4, 0.2, 0.05, 0.15, 0.17, 0.03],
+  "port_val": 0.1,
+  "max_stride": 3,
+  "lr": 1e-4,
+  "epochs": 1500,
+  "patience": 10,
+  "anom_thresh": 0.38,
+  "temp_thresh": 9,
+  "force_relearning": 0,
+  "norm_mode": "train_samples"
+}
