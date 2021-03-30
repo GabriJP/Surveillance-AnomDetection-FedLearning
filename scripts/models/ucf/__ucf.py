@@ -20,14 +20,14 @@
 ###############################################################################
 
 # Imported modules
-from tensorflow.keras import Model, Sequential, Input
+from keras.regularizers import l2
+from tensorflow.keras import Sequential
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras.losses import LossFunctionWrapper
-from keras.regularizers import l2
+
 
 def build_UCF_model():
-
     """Builder function for creating an empty UCF-Crime deep neural model
         which receives a 4096 length 1D-feature vector obtained from a ConvNet3D
         convolutional model applied over not overlaying video segments.
@@ -71,8 +71,8 @@ def build_UCF_model():
 
     return model
 
-class UCFHingeLoss(LossFunctionWrapper):
 
+class UCFHingeLoss(LossFunctionWrapper):
     """Implementation of the measure loss used for the UCF-Crime model
 
         Parameters
@@ -91,11 +91,11 @@ class UCFHingeLoss(LossFunctionWrapper):
     """
 
     def __init__(self, reduction='auto', vid_seg=32,
-                    lamb1=0.00008, lamb2=0.00008):
+                 lamb1=0.00008, lamb2=0.00008):
 
         super(UCFHingeLoss, self).__init__(objective_function, reduction,
-                                            'UCF-crime_hinge_loss',
-                                            vid_seg, lamb1, lamb2)
+                                           'UCF-crime_hinge_loss',
+                                           vid_seg, lamb1, lamb2)
 
         raise NotImplementedError()
 
@@ -118,9 +118,9 @@ class UCFHingeLoss(LossFunctionWrapper):
         if lamb2 < 0 or lamb2 > 1:
             raise ValueError('"lamb2" must be in [0, 1]')
 
-def objective_function(y_true, y_pred, vid_seg=32,
-                                            lamb1=0.00008, lamb2=0.00008):
 
+def objective_function(y_true, y_pred, vid_seg=32,
+                       lamb1=0.00008, lamb2=0.00008):
     # Prepare true labels and predictions
     y_true = K.flatten(y_true)
     y_pred = K.flatten(y_pred)
@@ -133,7 +133,7 @@ def objective_function(y_true, y_pred, vid_seg=32,
     n_vids_per_class = n_vids // 2
 
     # Compute max scores and sum scores for each video bag
-    #true_bag_max_score = K.max(y_true, axis=1)
+    # true_bag_max_score = K.max(y_true, axis=1)
     true_bag_sum_score = K.sum(y_true, axis=1)
     pred_bag_max_score = K.max(y_pred, axis=1)
     pred_bag_sum_score = K.sum(y_pred, axis=1)
@@ -146,12 +146,12 @@ def objective_function(y_true, y_pred, vid_seg=32,
                                         K.equal(true_bag_sum_score, 32))
 
     z = K.max(1 - pred_bag_max_score[anom_vid_index] +
-                pred_bag_max_score[normal_vid_index], 0) +
-        lamb1 * temp_sm_term + lamb2 * pred_bag_sum_score
+              pred_bag_max_score[normal_vid_index], 0) +
+    lamb1 * temp_sm_term + lamb2 * pred_bag_sum_score
+
 
 def objective_function2(y_true, y_pred, lamb1=0.00008, lamb2=0.00008):
-
-    #'Custom Objective function'
+    # 'Custom Objective function'
 
     y_true = K.flatten(y_true)
     y_pred = K.flatten(y_pred)
@@ -159,61 +159,60 @@ def objective_function2(y_true, y_pred, lamb1=0.00008, lamb2=0.00008):
     n_seg = 32  # Because we have 32 segments per video.
     nvid = K.get_value(y_true.get_shape()[0])
     n_exp = nvid / 2
-    Num_d=32*nvid
+    Num_d = 32 * nvid
 
-
-    sub_max = K.ones_like(y_pred) # sub_max represents the highest scoring instants in bags (videos).
-    sub_sum_labels = K.ones_like(y_true) # It is used to sum the labels in order to distinguish between normal and abnormal videos.
+    sub_max = K.ones_like(y_pred)  # sub_max represents the highest scoring instants in bags (videos).
+    sub_sum_labels = K.ones_like(
+        y_true)  # It is used to sum the labels in order to distinguish between normal and abnormal videos.
     sub_sum_l1 = K.ones_like(y_true)  # For holding the concatenation of summation of scores in the bag.
-    sub_l2 = K.ones_like(y_true) # For holding the concatenation of L2 of score in the bag.
+    sub_l2 = K.ones_like(y_true)  # For holding the concatenation of L2 of score in the bag.
 
     for i in range(nvid):
-
         # For Labels
         vid_seg = y_true[i * n_seg: i * n_seg + n_seg]
         # Esto coloca la suma de la puntuaciones de los segmentos del vídeo i en sub_sum_labels
-        sub_sum_labels = K.concatenate([sub_sum_labels, K.stack(K.sum(vid_seg))])  # Just to keep track of abnormal and normal vidoes
+        sub_sum_labels = K.concatenate(
+            [sub_sum_labels, K.stack(K.sum(vid_seg))])  # Just to keep track of abnormal and normal vidoes
 
         # For Features scores
         Feat_Score = y_pred[i * n_seg: i * n_seg + n_seg]
         # El primero coloca la puntuación del cuboide más anómalo en la posición
         # i de sub_max mientras que el segundo coloca la suma de las puntuaciones
         # de los segmentos en sub_sum_l1
-        sub_max = K.concatenate([sub_max, K.stack(K.max(Feat_Score))])         # Keep the maximum score of scores of all instances in a Bag (video)
-        sub_sum_l1 = K.concatenate([sub_sum_l1, K.stack(K.sum(Feat_Score))])   # Keep the sum of scores of all instances in a Bag (video)
+        sub_max = K.concatenate(
+            [sub_max, K.stack(K.max(Feat_Score))])  # Keep the maximum score of scores of all instances in a Bag (video)
+        sub_sum_l1 = K.concatenate(
+            [sub_sum_l1, K.stack(K.sum(Feat_Score))])  # Keep the sum of scores of all instances in a Bag (video)
 
         # Compute the temporal smoothness term
-        z1 = T.ones_like(Feat_Score) # length = n_seg
-        z2 = T.concatenate([z1, Feat_Score]) # length = 2*n_seg
-        z3 = T.concatenate([Feat_Score, z1]) # length = 2*n_seg
-        z_22 = z2[31:] # Esto sacaría la segunda parte (Feat_Score con un 1 delante) de z2
-        z_44 = z3[:33] # Esto sacaría la primera partr (Feat_Score con un 1 detrás) de z3
-        z = z_22 - z_44 # Aquí se estaría estando a cada valor de Feat_Score el valor que tiene en la posición i+1
+        z1 = T.ones_like(Feat_Score)  # length = n_seg
+        z2 = T.concatenate([z1, Feat_Score])  # length = 2*n_seg
+        z3 = T.concatenate([Feat_Score, z1])  # length = 2*n_seg
+        z_22 = z2[31:]  # Esto sacaría la segunda parte (Feat_Score con un 1 delante) de z2
+        z_44 = z3[:33]  # Esto sacaría la primera partr (Feat_Score con un 1 detrás) de z3
+        z = z_22 - z_44  # Aquí se estaría estando a cada valor de Feat_Score el valor que tiene en la posición i+1
         z = z[1:32]
         z = T.sum(T.sqr(z))
 
         # Save the temporal smoothness term on the i position of sub_l2
         sub_l2 = T.concatenate([sub_l2, T.stack(z)])
 
-
     # sub_max[Num_d:] means include all elements after Num_d.
     # AllLabels =[2 , 4, 3 ,9 ,6 ,12,7 ,18 ,9 ,14]
     # z=x[4:]
-    #[  6.  12.   7.  18.   9.  14.]
+    # [  6.  12.   7.  18.   9.  14.]
 
     sub_score = sub_max[Num_d:]  # We need this step since we have used T.ones_like
-    F_labels = sub_sum_labels[Num_d:] # We need this step since we have used T.ones_like
+    F_labels = sub_sum_labels[Num_d:]  # We need this step since we have used T.ones_like
     #  F_labels contains integer 32 for normal video and 0 for abnormal videos. This because of labeling done at the end of "load_dataset_Train_batch"
-
-
 
     # AllLabels =[2 , 4, 3 ,9 ,6 ,12,7 ,18 ,9 ,14]
     # z=x[:4]
     # [ 2 4 3 9]... This shows 0 to 3 elements
 
-    sub_sum_l1 = sub_sum_l1[Num_d:] # We need this step since we have used T.ones_like
+    sub_sum_l1 = sub_sum_l1[Num_d:]  # We need this step since we have used T.ones_like
     sub_sum_l1 = sub_sum_l1[:n_exp]
-    sub_l2 = sub_l2[Num_d:]         # We need this step since we have used T.ones_like
+    sub_l2 = sub_l2[Num_d:]  # We need this step since we have used T.ones_like
     sub_l2 = sub_l2[:n_exp]
 
     # F_labels contiene la suma de las puntuaciones reales anormales
@@ -222,14 +221,15 @@ def objective_function2(y_true, y_pred, lamb1=0.00008, lamb2=0.00008):
     # sub_l2 el término de suavizado temporal sobre los patrones anormales
 
     # Se coge un vídeo normal con la máxima puntuación de anomalía
-    indx_nor = K.equal(F_labels, 32).nonzero()[0]  # Index of normal videos: Since we labeled 1 for each of 32 segments of normal videos F_labels=32 for normal video
+    indx_nor = K.equal(F_labels, 32).nonzero()[
+        0]  # Index of normal videos: Since we labeled 1 for each of 32 segments of normal videos F_labels=32 for normal video
     # Se coge un vídeo anormal con la mínima puntuación de anomalía
     indx_abn = K.equal(F_labels, 0).nonzero()[0]
 
     n_Nor = n_exp
 
-    Sub_Nor = sub_score[indx_nor] # Maximum Score for each of abnormal video
-    Sub_Abn = sub_score[indx_abn] # Maximum Score for each of normal video
+    Sub_Nor = sub_score[indx_nor]  # Maximum Score for each of abnormal video
+    Sub_Abn = sub_score[indx_abn]  # Maximum Score for each of normal video
 
     # Se computa el loss hinge (no entiendo por qué hace el for)
     z = K.ones_like(y_true)

@@ -1,2 +1,4 @@
 # Excluded files from repository
 *.pyc
+
+.idea

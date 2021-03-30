@@ -274,7 +274,7 @@ class AsynOnLocalUpdate(Optimizer):
 
         return zip(pro_grads, var)
 
-    ## Delegate the rest of Optimizer's functions on the passed Optimizer ##
+    # Delegate the rest of Optimizer's functions on the passed Optimizer ##
     def minimize(self, loss, var_list, grad_loss=None, name=None, tape=None):
         return self.__base_optimizer.minimize(loss, var_list, grad_loss, name, tape)
 
@@ -442,7 +442,7 @@ class AsynOnLocalUpdate(Optimizer):
 
         return config
 
-    ## Delegate the rest of Optimizer's functions on the passed Optimizer ##
+    # Delegate the rest of Optimizer's functions on the passed Optimizer ##
     def minimize(self, loss, var_list, grad_loss=None, name=None, tape=None):
         return self.__base_optimizer.minimize(loss, var_list, grad_loss, name, tape)
 
