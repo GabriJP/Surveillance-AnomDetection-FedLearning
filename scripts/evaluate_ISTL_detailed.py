@@ -30,7 +30,8 @@ from models import istl
 from utils import root_sum_squared_error, split_measures_per_video
 
 physical_devices = config.experimental.list_physical_devices('GPU')
-config.experimental.set_memory_growth(physical_devices[0], True)
+if len(physical_devices):
+    config.experimental.set_memory_growth(physical_devices[0], True)
 
 # Constants
 CUBOIDS_LENGTH = 8

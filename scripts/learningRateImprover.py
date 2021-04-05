@@ -82,8 +82,7 @@ class LearningRateImprover(Callback):
         if not self._acumulate_epochs:
             self._lr_history.clear()
 
-        if self._initial_value and (not self._acumulate_epochs or
-                                    not self._lr_history):
+        if self._initial_value and (not self._acumulate_epochs or not self._lr_history):
             K.set_value(self.model.optimizer.lr, self._initial_value)
         else:
             self._initial_value = float(K.get_value(self.model.optimizer.lr))
@@ -116,7 +115,7 @@ class LearningRateImprover(Callback):
         if len(self._val_param) != self._patience:
             return
 
-        avg_delta = (sum(self._val_param) / len(self._val_param))
+        avg_delta = sum(self._val_param) / len(self._val_param)
 
         # Average delta parameter reduction is lower than minimum
         # delta and learning rate is readjusted

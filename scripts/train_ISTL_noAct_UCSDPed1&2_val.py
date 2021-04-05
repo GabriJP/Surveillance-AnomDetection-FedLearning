@@ -86,21 +86,22 @@
                                             [-s] save the resulting model
 """
 
-# Modules imported
-import time
-import sys
 import argparse
 import json
+import sys
+# Modules imported
+import time
+
 import numpy as np
-from tensorflow.keras.models import clone_model
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.losses import MeanSquaredError
-from tensorflow import config, random
 from cv2 import resize, cvtColor, COLOR_BGR2GRAY
-from utils import extract_experiments_parameters, plot_results
+from tensorflow import config, random
+from tensorflow.keras.losses import MeanSquaredError
+from tensorflow.keras.optimizers import Adam
+
 from fedLearn import SynFedAvgLearnModel
-from models import istl
 from learningRateImprover import LearningRateImprover
+from models import istl
+from utils import extract_experiments_parameters, plot_results
 from utils import root_sum_squared_error
 
 # Constants
@@ -111,18 +112,17 @@ NUM_CLIENTS = 2
 
 # Image resize function
 resize_fn = lambda img: np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY),
-                        (CUBOIDS_WIDTH, CUBOIDS_HEIGHT))/255, axis=2)
-
+                                              (CUBOIDS_WIDTH, CUBOIDS_HEIGHT)) / 255, axis=2)
 
 ### Input Arguments
-parser = argparse.ArgumentParser(description='Trains an Incremental Spatio'\
-                            ' Temporal Learner model for the UCSD Ped 1 and'\
-                            ' UCSD Ped 2 datasets on '\
-                            'a federated  architecture')
-parser.add_argument('-d', '--document', help='JSON file containing the train'\
-                    ' parameters', type=str)
-parser.add_argument('-s', '--save_model', help='Save the resulting model'\
-                    ' on a h5 file',
+parser = argparse.ArgumentParser(description='Trains an Incremental Spatio' \
+                                             ' Temporal Learner model for the UCSD Ped 1 and' \
+                                             ' UCSD Ped 2 datasets on ' \
+                                             'a federated  architecture')
+parser.add_argument('-d', '--document', help='JSON file containing the train' \
+                                             ' parameters', type=str)
+parser.add_argument('-s', '--save_model', help='Save the resulting model' \
+                                               ' on a h5 file',
                     action='store_true', default=False)
 
 args = parser.parse_args()
@@ -135,8 +135,7 @@ with open(exp_filename) as f:
     try:
         exp_data = json.load(f)
     except Exception as e:
-        print('Cannot load experiment JSON file'\
-            ' :\n',str(e), file=sys.stderr)
+        print(f'Cannot load experiment JSON file :\n{e}', file=sys.stderr)
         exit(-1)
 
 exp_data['script'] = __file__
@@ -160,35 +159,35 @@ test_video_dir_up2 = exp_data['UCSD Ped 2 - test_video_dir']
 test_label_up2 = exp_data['UCSD Ped 2 - test_label']
 
 data_train_up1 = istl.generators.CuboidsGeneratorFromImgs(
-        source=train_video_dir_up1,
-        cub_frames=CUBOIDS_LENGTH,
-        prep_fn=resize_fn)
+    source=train_video_dir_up1,
+    cub_frames=CUBOIDS_LENGTH,
+    prep_fn=resize_fn)
 
 data_test_up1 = istl.generators.CuboidsGeneratorFromImgs(source=test_video_dir_up1,
-                                    cub_frames=CUBOIDS_LENGTH,
-                                    prep_fn=resize_fn)
+                                                         cub_frames=CUBOIDS_LENGTH,
+                                                         prep_fn=resize_fn)
 data_test_up1 = istl.generators.ConsecutiveCuboidsGen(data_test_up1)
 test_labels_up1 = np.loadtxt(test_label_up1, dtype='int8')
 
 data_train_up2 = istl.generators.CuboidsGeneratorFromImgs(
-        source=train_video_dir_up2,
-        cub_frames=CUBOIDS_LENGTH,
-        prep_fn=resize_fn)
+    source=train_video_dir_up2,
+    cub_frames=CUBOIDS_LENGTH,
+    prep_fn=resize_fn)
 
 data_test_up2 = istl.generators.CuboidsGeneratorFromImgs(source=test_video_dir_up2,
-                                    cub_frames=CUBOIDS_LENGTH,
-                                    prep_fn=resize_fn)
+                                                         cub_frames=CUBOIDS_LENGTH,
+                                                         prep_fn=resize_fn)
 data_test_up2 = istl.generators.ConsecutiveCuboidsGen(data_test_up2)
 test_labels_up2 = np.loadtxt(test_label_up2, dtype='int8')
 
- # Configure GPU usage
+# Configure GPU usage
 physical_devices = config.experimental.list_physical_devices('GPU')
 config.experimental.set_memory_growth(physical_devices[0], True)
 
 # Perform training for each parameters combination
 results = []
 params = extract_experiments_parameters(exp_data, ('seed', 'batch_size',
-                                                'lr_decay', 'max_stride'))
+                                                   'lr_decay', 'max_stride'))
 
 for p in params:
 
@@ -205,13 +204,13 @@ for p in params:
 
         elif isinstance(p['batch_size'], (list, tuple)):
             if len(p['batch_size']) != NUM_CLIENTS:
-                print('The list of batch sizes for each client must provide a '\
-                        'batch size for the {} clients'.format(NUM_CLIENTS))
+                print(
+                    f'The list of batch sizes for each client must provide a batch size for the {NUM_CLIENTS} clients')
                 continue
 
         else:
-            print('Batch size provided is not valid, a single int or a list '\
-                    'of int must be provided for each experiment')
+            print(
+                'Batch size provided is not valid, a single int or a list of int must be provided for each experiment')
             continue
 
     # The generators must return the cuboids batch as label also when indexing
@@ -228,11 +227,11 @@ for p in params:
     # Augment the cuboids corresponding to the first partition
     for c in data:
         val_data[c], data[c] = data[c].take_subpartition(
-                                    p['port_val'] if 'port_val' in p else 0.1,
-                                    p['seed'] if 'seed' in p else None)
+            p['port_val'] if 'port_val' in p else 0.1,
+            p['seed'] if 'seed' in p else None)
         data[c].augment_data(max_stride=p['max_stride'] if 'max_stride' in p else 1)
         data[c].shuffle(shuf=bool(p['shuffle']) if 'shuffle' in p else False,
-                                seed=p['seed'] if 'seed' in p else time.time())
+                        seed=p['seed'] if 'seed' in p else time.time())
 
     t_start = time.time()
 
@@ -244,13 +243,11 @@ for p in params:
     adam = Adam(lr=1e-4, decay=p['lr_decay'] if 'lr_decay' in p else 0,
                 epsilon=1e-6)
 
-
     istl_fed_model = SynFedAvgLearnModel(build_fn=istl.build_ISTL,
-                                        n_clients=NUM_CLIENTS,
-                                        cub_length=CUBOIDS_LENGTH)
+                                         n_clients=NUM_CLIENTS,
+                                         cub_length=CUBOIDS_LENGTH)
     istl_fed_model.compile(optimizer=adam, loss=MeanSquaredError(),
-                            metrics=[root_sum_squared_error])
-
+                           metrics=[root_sum_squared_error])
 
     ########## Training  ##########
     t_1it_start = time.time()
@@ -258,88 +255,83 @@ for p in params:
 
     patience = p['patience'] if 'patience' in p else 0
     epochs = p['epochs'] if 'epochs' in p else 1
-    callbacks = {c:[LearningRateImprover(
-                                parameter='val_loss',
-                                min_lr=1e-7, factor=0.9,
-                                patience=patience,
-                                min_delta=1e-6, verbose=1,
-                                restore_best_weights=True,
-                                acumulate_epochs=True)] for c in range(NUM_CLIENTS)}
+    callbacks = {c: [LearningRateImprover(
+        parameter='val_loss',
+        min_lr=1e-7, factor=0.9,
+        patience=patience,
+        min_delta=1e-6, verbose=1,
+        restore_best_weights=True,
+        acumulate_epochs=True)] for c in range(NUM_CLIENTS)}
 
     hist = istl_fed_model.fit(x=data,
-                        validation_data=val_data,
-                        epochs=epochs,
-                        #early_stop_monitor='val_loss',
-                        #early_stop_patience=p['early_stop_patience'] if 'early_stop_patience' in p else 5,
-                        #early_stop_delta=p['early_stop_delta'] if 'early_stop_delta' in p else 1e-6,
-                        #early_stop_rest_best_weights = True,
-                        callbacks=callbacks,
-                        backup_filename='backup.h5',
-                        backup_epochs=10,
-                        backup_save_only_weights=False,
-                        backup_custom_objects={'root_sum_squared_error': root_sum_squared_error},
-                        verbose=2,
-                        shuffle=False)
+                              validation_data=val_data,
+                              epochs=epochs,
+                              # early_stop_monitor='val_loss',
+                              # early_stop_patience=p['early_stop_patience'] if 'early_stop_patience' in p else 5,
+                              # early_stop_delta=p['early_stop_delta'] if 'early_stop_delta' in p else 1e-6,
+                              # early_stop_rest_best_weights = True,
+                              callbacks=callbacks,
+                              backup_filename='backup.h5',
+                              backup_epochs=10,
+                              backup_save_only_weights=False,
+                              backup_custom_objects={'root_sum_squared_error': root_sum_squared_error},
+                              verbose=2,
+                              shuffle=False)
 
     t_1it_end = time.time()
     p['time'] = {'Training': (t_1it_end - t_1it_start)}
-    print('End of training - elapsed time {} s'.format(p['time']
-                                                            ['Training']))
+    print(f'End of training - elapsed time {p["time"]["Training"]} s')
 
     # Plot MSE
     for c in range(NUM_CLIENTS):
         # Plot MSE
         plot_results({'MSE - training': hist[c]['loss'],
-                        'MSE - validation': hist[c]['val_loss']},
-            'Mean Squared Error',
-            model_base_filename +
-            'ISTL_MSE_train_loss_client={}_exp={}.pdf'.format(c, len(results)+1))
+                      'MSE - validation': hist[c]['val_loss']},
+                     'Mean Squared Error',
+                     f'{model_base_filename} ISTL_MSE_train_loss_client={c}_exp={len(results) + 1}.pdf')
 
         np.savetxt(model_base_filename +
-            'ISTL_MSE_train_loss_client={}_exp={}.txt'.format(c, len(results)+1),
-                    hist[c]['loss'])
+                   f'ISTL_MSE_train_loss_client={c}_exp={len(results) + 1}.txt',
+                   hist[c]['loss'])
 
         np.savetxt(model_base_filename +
-            'ISTL_MSE_train_val_loss_client={}_exp={}.txt'.format(c, len(results)+1),
-                    hist[c]['val_loss'])
+                   f'ISTL_MSE_train_val_loss_client={c}_exp={len(results) + 1}.txt',
+                   hist[c]['val_loss'])
 
         # Plot RSSE
         plot_results({'RSSE - training': hist[c]['root_sum_squared_error'],
-                        'RSSE - validation': hist[c]['val_root_sum_squared_error']},
-            'Root of the Sum of Squared Errors',
-            model_base_filename +
-            'ISTL_RSSE_train_loss_client={}_exp={}.pdf'.format(c, len(results)+1))
+                      'RSSE - validation': hist[c]['val_root_sum_squared_error']},
+                     'Root of the Sum of Squared Errors',
+                     f'{model_base_filename} ISTL_RSSE_train_loss_client={c}_exp={len(results) + 1}.pdf')
 
         np.savetxt(model_base_filename +
-            'ISTL_RSSE_train_loss_client={}_exp={}.txt'.format(c, len(results)+1),
-                    hist[c]['root_sum_squared_error'])
+                   f'ISTL_RSSE_train_loss_client={c}_exp={len(results) + 1}.txt',
+                   hist[c]['root_sum_squared_error'])
 
         np.savetxt(model_base_filename +
-            'ISTL_RSSE_train_val_loss_client={}_exp={}.txt'.format(c, len(results)+1),
-                    hist[c]['val_root_sum_squared_error'])
+                   f'ISTL_RSSE_train_val_loss_client={c}_exp={len(results) + 1}.txt',
+                   hist[c]['val_root_sum_squared_error'])
 
         # Plot lr history
         plot_results({'Lr history': callbacks[c][0].lr_history},
-            'Learning rate history',
-            model_base_filename +
-            'ISTL_lr_history_client={}_exp={}.pdf'.format(c, len(results)+1))
+                     'Learning rate history',
+                     f'{model_base_filename} ISTL_lr_history_client={c}_exp={len(results) + 1}.pdf')
 
         np.savetxt(model_base_filename +
-            'ISTL_lr_history_client={}_exp={}.txt'.format(c, len(results)+1),
-                    callbacks[c][0].lr_history)
+                   f'ISTL_lr_history_client={c}_exp={len(results) + 1}.txt',
+                   callbacks[c][0].lr_history)
 
     ## Save model
     if store_models:
-        istl_fed_model.global_model.save(model_base_filename +
-                            '-experiment-'+str(len(results)) + '_model.h5')
+        istl_fed_model.global_model.save(f'{model_base_filename}-experiment-{len(results)}_model.h5')
 
     ########### Test ##############
     t_eval_start = time.time()
     evaluator = istl.EvaluatorISTL(model=istl_fed_model.global_model,
-                                        cub_frames=CUBOIDS_LENGTH,
-                                        # It's required to put any value
-                                        anom_thresh=0.1,
-                                        temp_thresh=1)
+                                   cub_frames=CUBOIDS_LENGTH,
+                                   # It's required to put any value
+                                   anom_thresh=0.1,
+                                   temp_thresh=1)
 
     data_train = istl.generators.CuboidsGenerator.merge(data_train_up1, data_train_up2)
 
@@ -348,38 +340,35 @@ for p in params:
     data_train.shuffle(False)
     train_rec_error = evaluator.score_cuboids(data_train, False)
 
-    p['training_rec_errors'] = {
-                                'mean': train_rec_error.mean(),
-                                'std': train_rec_error.std(),
-                                'min': train_rec_error.min(),
-                                'max': train_rec_error.max()
-                            }
+    p['training_rec_errors'] = dict(
+        mean=train_rec_error.mean(),
+        std=train_rec_error.std(),
+        min=train_rec_error.min(),
+        max=train_rec_error.max()
+    )
 
     t_eval_end = time.time()
     p['time']['test evaluation'] = (t_eval_end - t_eval_start)
 
-    print('Performing evaluation with all anomaly and temporal '\
-            'thesholds combinations')
+    print('Performing evaluation with all anomaly and temporal thesholds combinations')
     print('Evaluating UCSD Ped 1 test set:')
     all_meas_up1 = evaluator.evaluate_cuboids_range_params(data_test_up1,
-                                            test_labels_up1,
-                                            np.arange(0.01, 1, 0.01),
-                                            np.arange(1,10),
-                                            data_test_up1.cum_cuboids_per_video)
+                                                           test_labels_up1,
+                                                           np.arange(0.01, 1, 0.01),
+                                                           np.arange(1, 10),
+                                                           data_test_up1.cum_cuboids_per_video)
 
     print('Evaluating UCSD Ped 2 test set:')
     all_meas_up2 = evaluator.evaluate_cuboids_range_params(data_test_up2,
-                                            test_labels_up2,
-                                            np.arange(0.01, 1, 0.01),
-                                            np.arange(1,10),
-                                            data_test_up2.cum_cuboids_per_video)
-    p['results']= {'test all combinations': {'UCSD Ped 1': all_meas_up1,
-                                                'UCSD Ped 2': all_meas_up2}}
+                                                           test_labels_up2,
+                                                           np.arange(0.01, 1, 0.01),
+                                                           np.arange(1, 10),
+                                                           data_test_up2.cum_cuboids_per_video)
+    p['results'] = {'test all combinations': {'UCSD Ped 1': all_meas_up1,
+                                              'UCSD Ped 2': all_meas_up2}}
 
-    p['time']['total_elapsed time'] = (p['time']['test evaluation'] +
-                                            p['time']['Training'])
-    print('End of experiment - Total time taken: {}s'.format(p['time']
-                                                    ['total_elapsed time']))
+    p['time']['total_elapsed time'] = (p['time']['test evaluation'] + p['time']['Training'])
+    print(f'End of experiment - Total time taken: {p["time"]["total_elapsed time"]}s')
 
     results.append(p)
 
