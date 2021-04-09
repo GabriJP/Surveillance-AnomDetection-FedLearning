@@ -1,0 +1,108 @@
+html{
+    margin:  0;
+    padding: 0;             /*distance to left side */
+    background-color: ghostwhite;
+}
+body{
+    width:70%;              /*width of the side*/
+    margin:0 auto;
+    font: 100% Arial, Helvetica, sans-serif;
+    padding: 1em 50px;
+}
+
+/*Elements for figures*/
+figure {
+    text-align: center;
+}
+
+imgcation {
+    width: 80%;
+    display: inline-block;
+}
+
+.row_img {
+    content: "";
+    clear: both;
+    overflow: auto;
+}
+.column_img {
+    float: left;
+    width: 47%;
+}
+
+/*Elements for Test demos playing*/
+.test_demo {
+    content: "";
+    clear: both;
+    /*display: table;*/
+}
+
+.test_demo .title {
+    text-align: center;
+    font-size: large;
+}
+
+.demo_video {
+    text-align: center;
+    float: left;
+    width: 22.5%;
+}
+
+.demo_rec_error {
+    text-align: center;
+    float: left;
+    width: 55%;
+}
+
+.demo_video video {
+    width: 80%;
+    height: 80%;
+}
+
+.demo_rec_error img {
+    width: 80%;
+}
+
+.contact{
+    border: 5px solid RGB(16,50,110);
+    border-radius: 8px;
+    background: RGB(127,147,180);   
+    padding: 16px;
+    width: 100%;
+    color: black;
+    margin-bottom: 16px;
+}
+h1{
+    font-weight:bold;
+    font-size: 2em;
+    font-style: normal;     /*the font could be bolted*/
+    color:black;
+    margin: 1em 0 .4em;
+}
+h2, h3, h4, h5, h6{
+    color:#333333;
+    font-weight:normal;
+    width: inherit;
+}
+p{
+    line-height: 1.6;
+    text-align: justify;
+    /*width:90%;*/
+    margin: 0;      /*distance of the paragraphs to the left body side*/
+    margin-bottom: 1em;
+}
+a{
+    text-decoration: none;
+    color: mediumblue;
+    line-height: 1.6;
+}
+a:hover{
+    color: black;
+}
+footer{
+    border-top: 1px solid grey;
+    text-align: center;
+    font-size: 8em;
+    line-height: 4em;
+    margin-top: 1em;
+}

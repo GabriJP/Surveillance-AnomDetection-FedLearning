@@ -1,0 +1,376 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="description" content="Real-Word anomaly detection in Surveillance through Semi-supervised Federated Active Learning">
+		<meta name="author" content="Nicolás Cubero Torres">
+		<title>Real-Word anomaly detection in Surveillance through Semi-supervised Federated Active Learning</title>
+		<link rel="stylesheet" href="page_style.css">
+	</head>
+
+	<body>
+		<header role=banner>
+		<h1>Real-Word anomaly detection in Surveillance through Semi-supervised Federated Active Learning</h1>
+		<h2 align="right">Nicolás Cubero Torres, Francisco Barranco Expósito, Eduardo Ros Vidal</h2>
+		<h2 id="nav_top">Contents</h2>
+		<ul>
+			<li><a href="#Description">Description</a></li>
+			<li><a href="#Spatio-temporal">Spatio-Temporal learning of the normal behaviour</a></li>
+			<li><a href="#Fed-learn">Federated Learning from multiple data sources</a></li>
+			<li><a href="#Resources">Resources</a></li>
+			<li><a href="#Examples">Examples</a></li>
+		</ul>
+		</header>
+
+	<article role="article">
+		<section>
+			<h2 id="Desciption">Description</h2>
+			<p>This project shows the deployment and research on the application of Semi-supervised Deep Learning models
+				for the Anomaly Detection problem in Surveillance videos being developped on a synchronous federated training architecture
+				under the paradigm of <b>Federated Learning</b>, in which training is being performed distributelly over many train nodes.</p>
+			<p>This research is accompanied with the deployment of an <b>Active Learning</b> framework for the continuous learning of the model from continuous video recording streams.
+				<!--To conduct these investigation, unsupervised spatio-temporal learner models proposed by [1,2,3] are took as precedence to propose the base model besides the training and evaluation methods.--></p>
+
+			<figure>
+				<div class="row_img">
+				<img src="images/fed_learn_schema2.svg" alt="Federated learning system scheme" style="width:90%">
+				</div>
+				<imgcaption text-align=center>Fig 1. Federated learning System scheme.</imgcaption>
+			</figure>
+		</section>
+
+		<section>
+			<h2 id="Spatio-temporal">Spatio-temporal Learning of the normal behaviour</h2>
+
+			<figure>
+				<div class="row_img">
+				<div class="column_img">
+				<img src="images/modelo_istl_english.svg" alt="Spatio-temporal learner autoencoder architecture" style="width:100%">
+				</div>
+
+
+				<div class="column_img">
+				 <img src="images/autoencoder_deteccion_anomalia_english.svg" alt="Event classification workflow" style="width:100%">
+				</div>
+				</div>
+				<imgcation text-align=center>Fig 2. Spatio-temporal learner autoencoder scheme &amp; workflow.</imgcation>
+			</figure>
+
+			<p>Video-segments reconstruction autoencoder models proposed by [Rash_19, Yong_17, Mahm_16] are used to learn spatio-temporal features
+				from video sequences
+				containing normal events. The model is trained to perform accurate reconstruction for the video segments
+				containing normal events. As no abnormal event is feed, it is expected that reconstruction for normal
+				video segments being more accurate than video containing abnormal events.</p>
+
+			<figure>
+				<div class="row_img">
+				<img src="images/test32_example.svg" alt="Event analisys" style="width:70%">
+				</div>
+				<imgcation text-align=center>Fig 3. Frame cuboids analysis</imgcation>
+			</figure>
+
+			<p>The <b>Root of the sum of squared erros</b> is proposed as loss function to measure the
+				reconstruction accuracy for the input video
+				segments. Then, a normalized <b>anomaly threshold &mu; </b> is set
+				to separate both classes of video segments. Additionally, a second <b>temporal threshold &lambda;</b> is introduced
+				in order to mitigate the false positives due to error peaks caused by oclusions, sudden variation of light illuminance or
+				object appearence, etc. In this way, the temporal threshold determines the minimum number of consecutive anomalous
+				cuboids required to determine a video time strip to contain an abnormal event.
+			  </p>
+		</section>
+
+		<section>
+			<h2 id="Fed-learn">Federated learning from multiple data sources</h2>
+
+			<figure>
+				<div class="row_img">
+				<img src="images/fed_agr.svg" alt="Federated agregation" style="width:90%">
+				</div>
+				<imgcation text-align=center>Fig 3. Federated Agregation from multiple video data sources</imgcation>
+			</figure>
+
+			<p>A synchronous federated learning architecture is proposed to perform the autoencoder model learning
+			from multiple data sources. Training is being performed through two simulated client nodes. Each of one,
+			trains a local autoencoder model from an exclusive set of video segments. To conduct the agregation from the local
+		  models to the global model, <b>FedAvg</b> [kone_15] is applied.</p>
+
+			<p>Two different sets of experiments have been designed: On the first set, each dataset is split into two disjoint subsets for each
+			of the clients, and local training is performed on each one followed by agregation. This experiment let us to evaluate the real performance gain
+			through federated agregation in comparison with the base performance showed up by traditional training approaches. On the second set,
+			federated model is trained from multiple video sources provided from different datasets capturing the same scenario from diferent views. Each
+			client node performs local training over its video dataset. In this way, agregation capability from heterogeneus spatial structure information
+			is evaluated and compared against base performance showed by the single models being trained on each of the individual datasets.</p>
+
+			<p>Experiment results
+			proves closed quality metrics obtained by the federated models in comparison to the single models being trained over each of the single datasets.
+			This poses up robust and accurate aggregation
+			capabilities got by the Federated Learning paradigm for aggregating from identical spatial-structural data, as well as heterogeneus spatial-structure.</p>
+
+			<figure>
+				<div class="row_img">
+				<div class="column_img">
+				<img src="images/experimentISTL_UCSDPed1&2_noAct_val_2ISTL_MSE_train_loss_client=0_exp=4_log.svg" alt="Training loss evolution on federated learning for client #0" style="width:70%">
+				</div>
+
+				<div class="column_img">
+				 <img src="images/experimentISTL_UCSDPed1&2_noAct_val_2ISTL_MSE_train_loss_client=1_exp=4_log.svg" alt="Training loss evolution on federated learning for client #1" style="width:70%">
+				</div>
+				</div>
+				<imgcation text-align=center>Fig 4. Training loss evolution on federated training on each client node.</imgcation>
+			</figure>
+
+			<figure>
+				<div class="row_img">
+				<div class="column_img">
+				<img src="images/UP1_summ_rec_errors.svg" alt="Class Rec. errors got by centralized learning and federated learning offline" style="width:100%">
+				</div>
+
+				<div class="column_img">
+				 <img src="images/UP1_time_summ.svg" alt="Training time got by centralized learning and federated learning on UCSD Ped 1" style="width:70%">
+				</div>
+				</div>
+				<imgcation text-align=center>Fig 5. Reconstrucion error per test class and training time between the centralized learning paradigm and the federated learning paradigm.</imgcation>
+			</figure>
+		</section>
+
+		<section>
+			<h2 id="Resources">Resources</h2>
+			<p><ul>
+				<li>Source code for experiments and analysis can be found on the following <a href="https://github.com/Nico-Cubero/Surveillance-AnomDetection-FedLearning">repo</a></li>
+			</ul></p>
+		</section>
+
+		<section>
+			<h2 id="Examples">Examples</h2>
+			<p>Following some examples of the global model's event prediction capability can be played over some of the samples from each dataset. Move the mouse over each sample to see the reconstruction made by the model:</p>
+
+			<div class="test_demo" id="ex1">
+				<div class="title"><b>UCSD Ped 1 - Test 002</b></div>
+				<div class="demo_video original">
+				<div><b>Original Video</b></div>
+				<video>
+				<source src="videos/UCSDPed1_Test002.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+
+				<div class="demo_video reconstructed">
+				<div><b>Reconstr. Video</b></div>
+				<video>
+				<source src="videos/Rec_UCSDPed1_Test002.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+				<div class="demo_rec_error">
+				<!-- <img src="images/UCSDPed1_test2_ground_truth_2.svg" alt="Reconstruction error evolution graph"> -->
+				</div>
+			</div>
+
+
+			<div class="test_demo" id="ex2">
+				<div class="title"><b>UCSD Ped 1 - Test 010</b></div>
+				<div class="demo_video original">
+				<div><b>Original Video</b></div>
+				<video>
+				<source src="videos/UCSDPed1_Test010.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+
+				<div class="demo_video reconstructed">
+				<div><b>Reconstr. Video</b></div>
+				<video>
+				<source src="videos/Rec_UCSDPed1_Test010.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+				<div class="demo_rec_error">
+				<!-- <img src="images/UCSDPed1_test10_ground_truth2.svg" alt="Reconstruction error evolution graph"> -->
+				</div>
+			</div>
+
+			<div class="test_demo" id="ex3">
+				<div class="title"><b>UCSD Ped 1 - Test 027</b></div>
+				<div class="demo_video original">
+				<div><b>Original Video</b></div>
+				<video>
+				<source src="videos/UCSDPed1_Test027.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+
+				<div class="demo_video reconstructed">
+				<div><b>Reconstr. Video</b></div>
+				<video>
+				<source src="videos/Rec_UCSDPed1_Test027.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+				<div class="demo_rec_error">
+				<!-- <img src="images/UCSDPed1_test27_ground_truth2.svg" alt="Reconstruction error evolution graph"> -->
+				</div>
+			</div>
+
+
+			<div class="test_demo" id="ex4">
+				<div class="title"><b>UCSD Ped 2 - Test 2</b></div>
+				<div class="demo_video original">
+				<div><b>Original Video</b></div>
+				<video>
+				<source src="videos/UCSDPed2_Test002.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+
+				<div class="demo_video reconstructed">
+				<div><b>Reconstr. Video</b></div>
+				<video>
+				<source src="videos/Rec_UCSDPed2_Test002.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+				<div class="demo_rec_error">
+				<!-- <img src="images/UCSDPed2_test2_ground_truth2.svg" alt="Reconstruction error evolution graph"> -->
+				</div>
+			</div>
+
+			<div class="test_demo" id="ex5">
+				<div class="title"><b>UCSD Ped 2 - Test 7</b></div>
+				<div class="demo_video original">
+				<div><b>Original Video</b></div>
+				<video>
+				<source src="videos/UCSDPed2_Test007.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+
+				<div class="demo_video reconstructed">
+				<div><b>Reconstr. Video</b></div>
+				<video>
+				<source src="videos/Rec_UCSDPed2_Test007.webm" type="video/webm">
+				Your browser does not support video playing.
+				</video>
+				</div>
+
+				<div class="demo_rec_error">
+				<!-- <img src="images/UCSDPed2_test7_ground_truth2.svg" alt="Reconstruction error evolution graph"> -->
+				</div>
+			</div>
+		</section>
+
+		<section>
+			<h2 id="References">References</h2>
+			<ul>
+					<li><p><b>[Rash_19]</b> Rashmika Nawaratne, Damminda Alahakoon, Daswin Silva, and Xinghuo
+						Yu. Spatiotemporal anomaly detection using deep learning for real-time
+						video surveillance. IEEE Transactions on Industrial Informatics, PP:1–1, 08 2019.</p></li>
+					<li><p><b>[Yong_17]</b> Yong Shean Chong and Yong Haur Tay. Abnormal event detection in videos using spatiotemporal autoencoder. In International Symposium on Neural Networks, pages 189–196. Springer, 2017.</p></li>
+					<li><p><b>[Mahm_16]</b> Mahmudul Hasan, Jonghyun Choi, Jan Neumann, Amit K Roy-Chowdhury, and Larry S Davis. Learning temporal regularity in video sequences. In Proceedings of the IEEE conference on computer vision and pattern recognition, pages 733–742, 2016.</p></li>
+					<li><p><b>[Kone_15]</b> Jakub Konečný, Brendan McMahan, Daniel Ramage.
+					Federated Optimization: Distributed Optimization Beyond the Datacenter. arXiv preprint arXiv:1511.03575</p></li>
+			</ul>
+		</section>
+	</article>
+
+	<script type="module">
+		import ReconstrAnimationController from "./reconstrAnimationController.js"
+		// Build animations for each example
+		//	UCSD Ped 1 - Test 2
+		var test_ex1 = document.getElementById('ex1');
+		var ej1_player = new ReconstrAnimationController(test_ex1,"images/UCSDPed1_test2_ground_truth_2.svg",
+							"images/UCSDPed1_test2_prediction2.svg",
+ 							{
+								"x1": 0.104090577,
+								"y1": 0.072048611,
+								"x2": 0.97908035,
+								"y2": 0.878472222
+							});
+
+
+		test_ex1.addEventListener('mouseover', function(ev) {ej1_player.play();});
+		test_ex1.addEventListener('mouseout', function(ev) {ej1_player.stop();});
+		test_ex1.addEventListener('touchstart', function(ev) {ej1_player.play();});
+		test_ex1.addEventListener('touchend', function(ev) {ej1_player.stop();});
+		test_ex1.addEventListener('touchcancel', function(ev) {ej1_player.stop();});
+
+		//	UCSD Ped 1 - Test 10
+		var test_ex2 = document.getElementById('ex2');
+		var ej2_player = new ReconstrAnimationController(test_ex2,"images/UCSDPed1_test10_ground_truth2.svg",
+							"images/UCSDPed1_test10_prediction2.svg",
+							{
+								"x1": 0.094594595,
+								"y1": 0.070434783,
+								"x2": 0.972607743,
+								"y2": 0.880869565
+							});
+
+		test_ex2.addEventListener('mouseover', function(ev) {ej2_player.play();});
+		test_ex2.addEventListener('mouseout', function(ev) {ej2_player.stop();});
+		test_ex2.addEventListener('touchstart', function(ev) {ej2_player.play();});
+		test_ex2.addEventListener('touchend', function(ev) {ej2_player.stop();});
+		test_ex2.addEventListener('touchcancel', function(ev) {ej2_player.stop();});
+
+		//	UCSD Ped 1 - Test 27
+		var test_ex3 = document.getElementById('ex3');
+		var ej3_player = new ReconstrAnimationController(test_ex3,"images/UCSDPed1_test27_ground_truth2.svg",
+							"images/UCSDPed1_test27_prediction2.svg",
+							{
+								"x1": 0.095325055,
+								"y1": 0.071304348,
+								"x2": 0.972242513,
+								"y2": 0.880869565
+							});
+
+		test_ex3.addEventListener('mouseover', function(ev) {ej3_player.play();});
+		test_ex3.addEventListener('mouseout', function(ev) {ej3_player.stop();});
+		test_ex3.addEventListener('touchstart', function(ev) {ej3_player.play();});
+		test_ex3.addEventListener('touchend', function(ev) {ej3_player.stop();});
+		test_ex3.addEventListener('touchcancel', function(ev) {ej3_player.stop();});
+
+		//	UCSD Ped 2 - Test 2
+		var test_ex4 = document.getElementById('ex4');
+		var ej4_player = new ReconstrAnimationController(test_ex4,"images/UCSDPed2_test2_ground_truth2.svg",
+							"images/UCSDPed2_test2_prediction2.svg",
+							{
+								"x1": 0.104455807,
+								"y1": 0.074782609,
+								"x2": 0.972773265,
+								"y2": 0.881608696
+							});
+
+		test_ex4.addEventListener('mouseover', function(ev) {ej4_player.play();});
+		test_ex4.addEventListener('mouseout', function(ev) {ej4_player.stop();});
+		test_ex4.addEventListener('touchstart', function(ev) {ej4_player.play();});
+		test_ex4.addEventListener('touchend', function(ev) {ej4_player.stop();});
+		test_ex4.addEventListener('touchcancel', function(ev) {ej4_player.stop();});
+
+		//	UCSD Ped 2 - Test 7
+		var test_ex5 = document.getElementById('ex5');
+		var ej5_player = new ReconstrAnimationController(test_ex5,"images/UCSDPed2_test7_ground_truth2.svg",
+							"images/UCSDPed2_test7_prediction2.svg",
+							{
+								"x1": 0.094959825,
+								"y1": 0.073043478,
+								"x2": 0.972338203,
+								"y2": 0.869565217
+							});
+
+		test_ex5.addEventListener('mouseover', function(ev) {ej5_player.play();});
+		test_ex5.addEventListener('mouseout', function(ev) {ej5_player.stop();});
+		test_ex5.addEventListener('touchstart', function(ev) {ej5_player.play();});
+		test_ex5.addEventListener('touchend', function(ev) {ej5_player.stop();});
+		test_ex5.addEventListener('touchcancel', function(ev) {ej5_player.stop();});
+
+	</script>
+
+	</body>
+</html>
