@@ -27,7 +27,7 @@
 			<h2 id="Desciption">Description</h2>
 			<p>This project shows the deployment and research on the application of Semi-supervised Deep Learning models
 				for the Anomaly Detection problem in Surveillance videos being developped on a synchronous federated training architecture
-				under the paradigm of <b>Federated Learning</b>, in which training is being performed distributelly over many train nodes.</p>
+				under the paradigm of <b>Federated Learning</b>, in which training is performed distributed over many train nodes.</p>
 			<p>This research is accompanied with the deployment of an <b>Active Learning</b> framework for the continuous learning of the model from continuous video recording streams.
 				<!--To conduct these investigation, unsupervised spatio-temporal learner models proposed by [1,2,3] are took as precedence to propose the base model besides the training and evaluation methods.--></p>
 
@@ -59,8 +59,8 @@
 			<p>Video-segments reconstruction autoencoder models proposed by [Rash_19, Yong_17, Mahm_16] are used to learn spatio-temporal features
 				from video sequences
 				containing normal events. The model is trained to perform accurate reconstruction for the video segments
-				containing normal events. As no abnormal event is feed, it is expected that reconstruction for normal
-				video segments being more accurate than video containing abnormal events.</p>
+				containing normal events. As no abnormal event is feed during the training, it is expected that reconstruction for normal
+				video segments being more accurate than segments containing abnormal events.</p>
 
 			<figure>
 				<div class="row_img">
@@ -74,7 +74,7 @@
 				segments. Then, a normalized <b>anomaly threshold &mu; </b> is set
 				to separate both classes of video segments. Additionally, a second <b>temporal threshold &lambda;</b> is introduced
 				in order to mitigate the false positives due to error peaks caused by oclusions, sudden variation of light illuminance or
-				object appearence, etc. In this way, the temporal threshold determines the minimum number of consecutive anomalous
+				appearance of objects, etc. In this way, the temporal threshold determines the minimum number of consecutive anomalous
 				cuboids required to determine a video time strip to contain an abnormal event.
 			  </p>
 		</section>
@@ -95,8 +95,8 @@
 		  models to the global model, <b>FedAvg</b> [kone_15] is applied.</p>
 
 			<p>Two different sets of experiments have been designed: On the first set, each dataset is split into two disjoint subsets for each
-			of the clients, and local training is performed on each one followed by agregation. This experiment let us to evaluate the real performance gain
-			through federated agregation in comparison with the base performance showed up by traditional training approaches. On the second set,
+			of the clients, and local training is performed on each one followed by the agregation. This experiment let us to evaluate the real performance gain
+			through federated agregation in comparison with the base performance showed up by centralized training approaches. On the second set,
 			federated model is trained from multiple video sources provided from different datasets capturing the same scenario from diferent views. Each
 			client node performs local training over its video dataset. In this way, agregation capability from heterogeneus spatial structure information
 			is evaluated and compared against base performance showed by the single models being trained on each of the individual datasets.</p>
@@ -104,7 +104,7 @@
 			<p>Experiment results
 			proves closed quality metrics obtained by the federated models in comparison to the single models being trained over each of the single datasets.
 			This poses up robust and accurate aggregation
-			capabilities got by the Federated Learning paradigm for aggregating from identical spatial-structural data, as well as heterogeneus spatial-structure.</p>
+			capabilities got by the Federated Learning paradigm for aggregating from identical spatial-structural data, as well as spatial heterogeneus data.</p>
 
 			<figure>
 				<div class="row_img">
@@ -116,7 +116,7 @@
 				 <img src="images/experimentISTL_UCSDPed1&2_noAct_val_2ISTL_MSE_train_loss_client=1_exp=4_log.svg" alt="Training loss evolution on federated learning for client #1" style="width:70%">
 				</div>
 				</div>
-				<imgcation text-align=center>Fig 4. Training loss evolution on federated training on each client node.</imgcation>
+				<imgcation text-align=center>Fig 4. Training loss evolution on federated training over each client node for the first experiment set over UCSD Ped 1 dataset.</imgcation>
 			</figure>
 
 			<figure>
@@ -129,20 +129,22 @@
 				 <img src="images/UP1_time_summ.svg" alt="Training time got by centralized learning and federated learning on UCSD Ped 1" style="width:70%">
 				</div>
 				</div>
-				<imgcation text-align=center>Fig 5. Reconstrucion error per test class and training time between the centralized learning paradigm and the federated learning paradigm.</imgcation>
+				<imgcation text-align=center>Fig 5. Test class reconstruction error and training time comparisons between the centralized learning paradigm and the federated learning paradigm for the first experiment set over UCSD Ped 1 dataset.</imgcation>
 			</figure>
 		</section>
 
 		<section>
 			<h2 id="Resources">Resources</h2>
 			<p><ul>
-				<li>Source code for experiments and analysis can be found on the following <a href="https://github.com/Nico-Cubero/Surveillance-AnomDetection-FedLearning">repo</a></li>
+				<li>Source code for experiments and analysis, and full documentation and experiments analysis can be found on the following <a href="https://github.com/Nico-Cubero/Surveillance-AnomDetection-FedLearning">repo</a></li>
 			</ul></p>
 		</section>
 
 		<section>
 			<h2 id="Examples">Examples</h2>
-			<p>Following some examples of the global model's event prediction capability can be played over some of the samples from each dataset. Move the mouse over each sample to see the reconstruction made by the model:</p>
+			<p>Following some examples of the global model's event prediction capability can be played over some of the samples from each dataset.
+				For all the samples &mu;=0.5 and &lambda;=9 are used.
+				Move the mouse over each sample to see the reconstruction made by the model:</p>
 
 			<div class="test_demo" id="ex1">
 				<div class="title"><b>UCSD Ped 1 - Test 002</b></div>
