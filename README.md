@@ -29,6 +29,7 @@ Download the *UCSD Ped 1* and *UCSD Ped 2* [datasets](http://svcl.ucsd.edu/proje
 
 This repository is organised into the following folder structure:
 
+* `docs`: Includes the main report and slides for the public defense (both in Spanish language).
 * `experiment description`: Experiment configuration JSON documents used for defining and executing all the experiments ran through the training scripts.
 * `labels`: Label files for the *UCSD Ped 1* and *UCSD Ped 2* datasets test sets required for the evaluation of the models.
 * `scripts`: Contains all the scripts written for the development of experiments, models evaluation and experiment analysis. More usage documentation is provided into this folder and in the preamble of each script.
