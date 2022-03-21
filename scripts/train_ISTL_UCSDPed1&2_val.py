@@ -142,20 +142,18 @@ CUBOIDS_WIDTH = 224
 CUBOIDS_HEIGHT = 224
 NUM_CLIENTS = 2
 
+
 # Image resize function
-resize_fn = lambda img: np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY),
-                                              (CUBOIDS_WIDTH, CUBOIDS_HEIGHT)) / 255, axis=2)
+def resize_fn(img):
+    np.expand_dims(resize(cvtColor(img, COLOR_BGR2GRAY), (CUBOIDS_WIDTH, CUBOIDS_HEIGHT)) / 255, axis=2)
 
 ### Input Arguments
-parser = argparse.ArgumentParser(description='Trains an Incremental Spatio' \
-                                             ' Temporal Learner model for the UCSD Ped 1 and' \
-                                             ' UCSD Ped 2 datasets by using active learning on ' \
-                                             'a federated  architecture')
-parser.add_argument('-d', '--document', help='JSON file containing the train' \
-                                             ' parameters', type=str)
-parser.add_argument('-s', '--save_model', help='Save the resulting model' \
-                                               ' on a h5 file',
-                    action='store_true', default=False)
+parser = argparse.ArgumentParser(description='Trains an Incremental Spatio Temporal Learner model for the UCSD Ped 1 '
+                                             'and UCSD Ped 2 datasets by using active learning on a federated '
+                                             'architecture')
+parser.add_argument('-d', '--document', help='JSON file containing the train parameters', type=str)
+parser.add_argument('-s', '--save_model', help='Save the resulting model on a h5 file', action='store_true',
+                    default=False)
 
 args = parser.parse_args()
 
@@ -497,8 +495,9 @@ for p in params:
         if any(data[c] is not None for c in data):
             t_2it_start = time.time()
             print('Training on 2nd iteration - start time: {} s'.format(t_2it_start - t_start))
-            print(f'- Client 0: {len(data[0]) if data[0] is not None else 0} samples from UCSD Ped 1, '
-                  f'Client 1: {len(data[1]) if data[1] is not None else 0} samples from UCSD Ped 2')
+            print('- Client 0: {} samples from UCSD Ped 1, Client 1: {} samples from UCSD Ped 2'.format(
+                len(data[0]) if data[0] is not None else 0,
+                len(data[1]) if data[1] is not None else 0))
 
             patience = p['patience'] if 'patience' in p else 0
             epochs = p['epochs'] if 'epochs' in p else 1
@@ -532,7 +531,7 @@ for p in params:
             print('End of training - elapsed time {} s'.format(q['time']
                                                                ['2nd iteration']))
 
-            # Save model
+            ## Save model
             if store_models:
                 istl_fed_model_copy.global_model.save(model_base_filename +
                                                       '-experiment-' + str(len(results)) + '_2nd_iteration_model.h5')

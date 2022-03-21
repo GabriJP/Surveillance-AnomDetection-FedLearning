@@ -27,13 +27,13 @@ MAP_FIELD_NAMES = {'accuracy': 'Accuracy',
                    'TPRxTNR': 'TPRxTNR'}
 
 
-# Defined function
+## Defined function
 def get_results_data(data: dict or list):
     """Gets the list of dicts containing the performance measures for each pair
         anomaly and temporal threshold
     """
 
-    results = list()
+    results = []
 
     if isinstance(data, list):
         for d in data:
@@ -57,13 +57,13 @@ and all(
                                                         'AUC', 'EER')
 """
 
-# Input Arguments
-parser = argparse.ArgumentParser(description='Make graphs for the main '
-                                             ' performance metrics stored'
-                                             ' on a json results file for '
-                                             'each pair of anomaly and '
+### Input Arguments
+parser = argparse.ArgumentParser(description='Make graphs for the main ' \
+                                             ' performance metrics stored' \
+                                             ' on a json results file for ' \
+                                             'each pair of anomaly and ' \
                                              ' temporal thresholds')
-parser.add_argument('-r', '--results', help='JSON file containing the '
+parser.add_argument('-r', '--results', help='JSON file containing the ' \
                                             ' performance metrics', type=str, required=True)
 
 args = parser.parse_args()
@@ -82,14 +82,16 @@ with open(results_fn) as f:
     try:
         results_data = json.load(f)
     except Exception as e:
-        print('Cannot load JSON results file :\n', str(e), file=sys.stderr)
+        print('Cannot load JSON results file' \
+              ' :\n', str(e), file=sys.stderr)
         exit(-1)
 
 results = get_results_data(results_data)
 
 # Draw graphs performance
 if results:
-    results = pd.DataFrame.from_records(results, exclude=('confusion matrix', 'reconstruction_error_norm'))
+    results = pd.DataFrame.from_records(results, exclude=('confusion matrix',
+                                                          'reconstruction_error_norm'))
 
     for y in MAP_FIELD_NAMES.keys():
 
@@ -106,4 +108,4 @@ if results:
         plt.ylabel(MAP_FIELD_NAMES[y])
         plt.xlabel(u'\u03BC')
         plt.title(MAP_FIELD_NAMES[y])
-        plt.savefig(f'{base_fn}_{y}.pdf')
+        plt.savefig(base_fn + '_{}.pdf'.format(y))

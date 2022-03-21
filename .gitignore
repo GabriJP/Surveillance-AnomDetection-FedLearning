@@ -1,4 +1,4 @@
 # Excluded files from repository
 *.pyc
-
 .idea
+UCSD_Anomaly_Dataset.v1p2
